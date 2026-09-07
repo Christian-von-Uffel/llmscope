@@ -1,0 +1,45 @@
+:root { --bg:#0f1113; --panel:#171a1e; --line:#262b31; --text:#f3f4f6; --muted:#9aa0a6; --accent:#ffd166; --green:#178a3a; --red:#c11f1f; --amber:#d97a12; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--text); font: 14px/1.45 -apple-system, "Helvetica Neue", Helvetica, Arial, sans-serif; }
+.top { display:flex; align-items:baseline; gap:18px; padding:16px 24px; border-bottom:1px solid var(--line); }
+.brand { font-weight:800; font-size:20px; letter-spacing:-0.3px; }
+.ver { color:var(--muted); font-weight:400; font-size:12px; margin-left:4px; }
+.tagline { color:var(--muted); }
+.layout { display:grid; grid-template-columns: 440px 1fr; gap:20px; padding:20px 24px; }
+@media (max-width: 1000px) { .layout { grid-template-columns: 1fr; } }
+.panel { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:18px; }
+label { display:block; margin-bottom:12px; font-weight:600; font-size:13px; }
+label .hint { font-weight:400; color:var(--muted); margin-left:6px; }
+input, textarea, select { display:block; width:100%; margin-top:5px; background:#0c0e10; color:var(--text); border:1px solid var(--line); border-radius:6px; padding:8px 10px; font: 13px/1.4 ui-monospace, Menlo, Consolas, monospace; }
+textarea { resize: vertical; }
+.row { display:grid; grid-template-columns: 1fr 1fr; gap:12px; }
+.row.three { grid-template-columns: 1fr 1fr 1fr; }
+details { margin-bottom:12px; } summary { cursor:pointer; color:var(--muted); font-weight:600; margin-bottom:8px; }
+.key .remember { display:flex; align-items:center; gap:6px; font-weight:400; color:var(--muted); margin-top:6px; } .key .remember input { width:auto; margin:0; }
+.actions { display:flex; gap:8px; flex-wrap:wrap; margin: 6px 0 12px; }
+button { cursor:pointer; border-radius:6px; border:1px solid var(--line); padding:9px 14px; font-weight:700; font-size:13px; background:#22272e; color:var(--text); }
+button.primary { background:var(--green); border-color:var(--green); }
+button.danger { background:var(--red); border-color:var(--red); }
+button.ghost { background:transparent; }
+button.small { padding:6px 10px; font-size:12px; }
+button:disabled { opacity:.45; cursor:not-allowed; }
+.problems { background:#3a1414; border:1px solid #6e1414; border-radius:6px; padding:10px 12px; margin-bottom:12px; white-space:pre-line; }
+.idbox { border-top:1px solid var(--line); padding-top:12px; color:var(--muted); }
+.idbox code { color:var(--accent); font-size:16px; font-weight:700; }
+.linkrow { display:flex; gap:8px; margin-top:8px; } .linkrow input { margin:0; }
+.toolbar { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:12px; flex-wrap:wrap; }
+.progress { position:relative; flex:1; min-width:220px; height:30px; background:#0c0e10; border:1px solid var(--line); border-radius:6px; overflow:hidden; }
+.progress #bar { position:absolute; inset:0 auto 0 0; width:0; background:var(--green); opacity:.5; transition: width .2s; }
+.progress span { position:absolute; inset:0; display:flex; align-items:center; padding:0 10px; font: 12px ui-monospace, Menlo, monospace; color:var(--text); }
+.dl { display:flex; gap:8px; }
+.card { background:#000; border-radius:8px; overflow:hidden; aspect-ratio:1/1; max-height:80vh; margin:0 auto; display:flex; align-items:center; justify-content:center; }
+.card svg { width:100%; height:100%; display:block; }
+.empty { color:var(--muted); padding:40px; text-align:center; max-width:420px; }
+.responses { margin-top:16px; }
+table { width:100%; border-collapse:collapse; font-size:12px; }
+th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+th { color:var(--muted); font-weight:600; }
+td.resp { max-width:520px; white-space:pre-wrap; color:#d5d8dc; }
+td.resp.clip { max-height:3.2em; overflow:hidden; cursor:pointer; }
+.tag { display:inline-block; padding:2px 7px; border-radius:4px; font-weight:700; font-size:11px; }
+.tag.refused { background:var(--red); } .tag.answered { background:var(--green); } .tag.matched { background:var(--amber); } .tag.error { background:#3b4048; }
