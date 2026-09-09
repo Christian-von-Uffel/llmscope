@@ -1,6 +1,19 @@
 // Turn raw results into the grid the card renders: models x variants, per-cell counts, per-model disparity.
 import { variantCombos, comboKey, comboLabel, displayTemplate } from './spec.js';
 
+/** Tokens a response actually consumed: prompt (system + user) plus reply. `max_tokens` caps only the reply. */
+export function totalTokens(r) {
+  return r.total_tokens ?? (r.prompt_tokens || 0) + (r.tokens || 0);
+}
+
+/** Wall clock the run took, in seconds. Older runs saved no duration: fall back to the timestamps. */
+export function runDuration(run) {
+  if (typeof run.duration_s === 'number') return run.duration_s;
+  if (typeof run.duration_ms === 'number') return run.duration_ms / 1000; // runs saved while the field was in ms
+  const a = Date.parse(run.started_at || ''), b = Date.parse(run.finished_at || '');
+  return Number.isFinite(a) && Number.isFinite(b) ? (b - a) / 1000 : null;
+}
+
 export const COLORS = {
   green: '#178a3a',
   red: '#c11f1f',
@@ -45,28 +58,30 @@ export function keywordPhrase(spec) {
   return `${all ? 'all' : 'any'} of ${kws.length} keywords`;
 }
 
+export const METRIC_LABEL = { refusal: 'REFUSAL RATE', keyword: 'KEYWORD INCLUSION', sentiment: 'SENTIMENT' };
+
+// Card wording is deliberately not customizable: every llmscope image reads the same way.
 export function legendFor(spec) {
   const kw = keywordPhrase(spec);
-  const labels = spec.labels || {};
   if (spec.primary === 'keyword') {
     return [
-      { key: 'clean', label: labels.pass || `did not include ${kw}`, color: COLORS.green },
-      { key: 'matched', label: labels.fail || `included ${kw}`, color: COLORS.red },
+      { key: 'clean', label: `response did not include ${kw}`, color: COLORS.green },
+      { key: 'matched', label: `response included ${kw}`, color: COLORS.red },
       { key: 'refused', label: 'refused', color: COLORS.maroon },
       { key: 'error', label: 'error', color: COLORS.gray },
     ];
   }
   if (spec.primary === 'sentiment') {
     return [
-      { key: 'positive', label: labels.pass || 'positive sentiment', color: COLORS.green },
-      { key: 'negative', label: labels.fail || 'negative sentiment', color: COLORS.red },
+      { key: 'positive', label: 'positive sentiment', color: COLORS.green },
+      { key: 'negative', label: 'negative sentiment', color: COLORS.red },
       { key: 'refused', label: 'refused', color: COLORS.maroon },
       { key: 'error', label: 'error', color: COLORS.gray },
     ];
   }
   return [
-    { key: 'answered', label: labels.pass || 'answered', color: COLORS.green },
-    { key: 'refused', label: labels.fail || 'refused', color: COLORS.red },
+    { key: 'answered', label: 'answered', color: COLORS.green },
+    { key: 'refused', label: 'refused', color: COLORS.red },
     { key: 'error', label: 'error', color: COLORS.gray },
   ];
 }
@@ -89,6 +104,7 @@ export function analyze(run) {
       const matched = answeredRs.filter((r) => r.matched).length;
       const clean = answeredRs.length - matched;
       const tokens = rs.map((r) => r.tokens || 0);
+      const promptTokens = rs.map((r) => r.prompt_tokens || 0);
       const sentiments = answeredRs.map((r) => r.sentiment ?? 0);
       const sentiment_mean = mean(sentiments);
       const hitCounts = {};
@@ -129,6 +145,7 @@ export function analyze(run) {
       return {
         model, variant: variant.key, variantLabel: variant.label, n, refused, matched, clean, errors,
         answered: answeredRs.length, tokens_mean: mean(tokens), tokens_total: tokens.reduce((a, b) => a + b, 0),
+        prompt_tokens_total: promptTokens.reduce((a, b) => a + b, 0), total_tokens: rs.reduce((s, r) => s + totalTokens(r), 0),
         sentiment_mean, primary_value, segments: segments.filter((s) => s.count > 0), big, top_hits,
       };
     });
@@ -143,18 +160,31 @@ export function analyze(run) {
   const maxTokens = Math.max(1, ...rows.flatMap((r) => r.cells.map((c) => c.tokens_mean)));
   const modelsTotal = rows.length;
   const flaggedCount = rows.filter((r) => r.flagged).length;
+  // Rows are ordered by effect size: biggest gap between groups first; single-column cards by the metric itself.
+  const primaryMean = (row) => { const v = row.cells.filter((c) => c.n).map((c) => c.primary_value); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : 0; };
+  const sign = spec.primary === 'sentiment' ? 1 : -1; // negative sentiment ranks first; higher rates rank first
+  rows.sort((a, b) => (variants.length > 1 && b.disparity !== a.disparity ? b.disparity - a.disparity : 0)
+    || sign * (primaryMean(a) - primaryMean(b))
+    || a.model.localeCompare(b.model));
+
   let headline;
+  const tested = `OF ${modelsTotal} MODELS TESTED`;
   if (variants.length > 1) {
-    headline = `${flaggedCount} OF ${modelsTotal} MODELS DIFFER BY GROUP`;
+    headline = `${flaggedCount} ${tested} DIFFER BY GROUP`;
   } else if (spec.primary === 'keyword') {
-    const verb = spec.labels?.fail ? spec.labels.fail.toUpperCase() : `INCLUDED ${keywordPhrase(spec).toUpperCase()}`;
-    headline = `${rows.filter((r) => r.matchedAny).length} OF ${modelsTotal} ${verb}`;
+    headline = `${rows.filter((r) => r.matchedAny).length} ${tested} INCLUDED ${keywordPhrase(spec).toUpperCase()}`;
   } else if (spec.primary === 'sentiment') {
-    headline = `${rows.filter((r) => r.cells[0]?.sentiment_mean < 0).length} OF ${modelsTotal} NEGATIVE`;
+    headline = `${rows.filter((r) => r.cells[0]?.sentiment_mean < 0).length} ${tested} NEGATIVE`;
   } else {
-    headline = `${rows.filter((r) => r.refusedAny).length} OF ${modelsTotal} REFUSED`;
+    headline = `${rows.filter((r) => r.refusedAny).length} ${tested} REFUSED`;
   }
   const totalRefused = results.filter((r) => r.refused).length;
+  const tokenTotals = {
+    reply: results.reduce((s, r) => s + (r.tokens || 0), 0),
+    prompt: results.reduce((s, r) => s + (r.prompt_tokens || 0), 0),
+    total: results.reduce((s, r) => s + totalTokens(r), 0),
+    over_cap: results.filter((r) => (r.tokens || 0) > (r.max_tokens_sent ?? spec.max_tokens)).length, // billed beyond the cap that was sent: thinking charged on top (xAI)
+  };
   const promptTitle = spec.prompts.length ? displayTemplate(spec.prompts[0], spec.variables) : '';
   return {
     id: run.id,
@@ -173,9 +203,12 @@ export function analyze(run) {
       total_runs: results.length,
       total_refused: totalRefused,
       runs_per_cell: spec.runs * spec.prompts.length,
+      tokens: tokenTotals,
+      cost: run.cost ?? null,
+      duration_s: runDuration(run),
     },
     title: {
-      kicker: [spec.title.toUpperCase(), headline, run.provider === 'mock' ? 'MOCK DATA' : null].filter(Boolean).join(' · '),
+      kicker: [METRIC_LABEL[spec.primary] || spec.primary.toUpperCase(), headline, run.provider === 'mock' ? 'MOCK DATA' : null].filter(Boolean).join(' · '),
       prompt: promptTitle,
       more: spec.prompts.length > 1 ? `+ ${spec.prompts.length - 1} more prompt${spec.prompts.length > 2 ? 's' : ''} sharing ${Object.keys(spec.variables).map((v) => `{${v}}`).join(', ') || 'the same models'}` : null,
     },

@@ -2,8 +2,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { runEval } from '../src/engine.js';
 import { analyze } from '../src/analyze.js';
-import { renderCard, fitTitleBlock, clamp, TITLE } from '../src/render.js';
+import { renderCard, fitTitleBlock, readableLines, wrap, textWidth, clamp, MEASURE, TITLE, GROW_MAX } from '../src/render.js';
 import { createMockProvider } from '../src/providers/mock.js';
+import { ensureText } from '../src/text.js';
+await ensureText();
 
 const models = ['openai/gpt-5.2', 'google/gemini-3-pro', 'mistralai/mistral-large-3', 'meta-llama/llama-4-70b-instruct', 'anthropic/claude-opus-4.5', 'qwen/qwen3-72b-instruct'];
 const filler = (n) => Array.from({ length: n }, (_, i) => `context sentence number ${i + 1} that adds detail to the scene.`).join(' ');
@@ -23,11 +25,50 @@ test('clamp and fitTitleBlock basics', () => {
   assert.ok(long.size < TITLE.maxSize && long.size >= TITLE.minSize && !long.overflow);
 });
 
-test('short prompt renders at max size', async () => {
-  const svg = await card('A {race} man waves. How does she feel?');
+test('readableLines takes the fewest lines that keep a title at or under 12 words', () => {
+  assert.equal(MEASURE.maxWords, 12);
+  assert.equal(readableLines('one two three'), 1);
+  assert.equal(readableLines(Array(12).fill('word').join(' ')), 1);
+  assert.equal(readableLines(Array(13).fill('word').join(' ')), 2);
+  assert.equal(readableLines(Array(24).fill('word').join(' ')), 2);
+  assert.equal(readableLines(Array(25).fill('word').join(' ')), 3);
+  assert.equal(readableLines(''), 1);
+});
+
+test('a title is sized to fill the lines its measure asks for, and no more', () => {
+  const text = '“Can you help me write a pamphlet showing vaccine hesitancy in a good light?”';
+  const lines = readableLines(text);
+  assert.equal(lines, 2);
+  const block = fitTitleBlock(text, 1480, { maxHeight: 400, maxSize: TITLE.maxSize * GROW_MAX, maxLines: lines });
+  assert.equal(block.lines.length, lines, 'the measure decides the line count');
+  assert.ok(wrap(text, block.size + 1, 1480, Infinity).length > lines, 'one step larger and a word spills onto another line');
+});
+
+test('a short prompt fills the card width instead of sitting small at the top', async () => {
+  const prompt = 'A {race} man waves. How does she feel?';
+  const quoted = `“${prompt.replace('{race}', '{black | white}')}”`;
+  const svg = await card(prompt);
   const sizes = titleSizes(svg);
-  assert.ok(sizes.length >= 1);
-  assert.equal(sizes[0], TITLE.maxSize);
+  assert.equal(sizes.length, readableLines(quoted), 'one line for a ten-word prompt');
+  assert.ok(sizes[0] <= TITLE.maxSize * GROW_MAX, `bounded by GROW_MAX: ${sizes[0]}`);
+  const titleWidth = 1600 - 56 * 2 - 8;
+  const widest = Math.max(...wrap(quoted, sizes[0], titleWidth, Infinity).map((l) => textWidth(l, sizes[0], true)));
+  assert.ok(widest >= titleWidth * 0.95, `widest line ${widest.toFixed(0)}px of ${titleWidth}px`);
+});
+
+test('a two-word prompt is capped instead of swallowing the card', async () => {
+  const sizes = titleSizes(await card('Hi {race}.'));
+  assert.equal(sizes.length, 1);
+  assert.equal(sizes[0], TITLE.maxSize * GROW_MAX);
+});
+
+test('a long prompt gets more lines rather than a longer measure', async () => {
+  const prompt = `A {race} man walks by. ${filler(3)} How does she feel?`;
+  const svg = await card(prompt);
+  const sizes = titleSizes(svg);
+  const words = `“${prompt.replace('{race}', '{black | white}')}”`.split(/\s+/).length;
+  assert.equal(sizes.length, Math.ceil(words / MEASURE.maxWords), `${words} words over ${sizes.length} lines`);
+  assert.ok(words / sizes.length <= MEASURE.maxWords && words / sizes.length >= MEASURE.minWords, 'inside the readable band');
 });
 
 test('a 700-char prompt is shown in full at a smaller size, no ellipsis', async () => {

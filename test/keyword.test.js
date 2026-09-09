@@ -13,12 +13,10 @@ test('keyword phrase adapts to count and mode', () => {
   assert.equal(keywordPhrase({ keywords: ['/far-(left|right)/', 'x'], keyword_mode: 'any' }), '“far-(left|right)” or “x”');
 });
 
-test('legend without labels uses the phrase; labels override it', () => {
-  const l = legendFor({ primary: 'keyword', keywords: ['consult', 'doctor'], keyword_mode: 'any', labels: null });
-  assert.equal(l[0].label, 'did not include “consult” or “doctor”');
-  assert.equal(l[1].label, 'included “consult” or “doctor”');
-  const o = legendFor({ primary: 'keyword', keywords: ['x'], keyword_mode: 'any', labels: { pass: 'clean', fail: 'flagged' } });
-  assert.equal(o[1].label, 'flagged');
+test('legend uses the standard "response included" phrasing', () => {
+  const l = legendFor({ primary: 'keyword', keywords: ['consult', 'doctor'], keyword_mode: 'any' });
+  assert.equal(l[0].label, 'response did not include “consult” or “doctor”');
+  assert.equal(l[1].label, 'response included “consult” or “doctor”');
 });
 
 test('cells expose per-keyword hit counts and the card prints them', async () => {
@@ -39,5 +37,5 @@ test('cells expose per-keyword hit counts and the card prints them', async () =>
   const svg = renderCard(a);
   const hit = cells.find((c) => c.top_hits.length)?.top_hits[0];
   assert.ok(svg.includes(`${hit.kw} ×${hit.count}`), 'hit shown in the cell');
-  assert.match(a.summary.headline, /MODELS DIFFER BY GROUP/);
+  assert.match(a.summary.headline, /MODELS TESTED DIFFER BY GROUP/);
 });

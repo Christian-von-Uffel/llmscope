@@ -2,9 +2,10 @@
 import { shortId } from './id.js';
 
 export const PRIMARY_METRICS = ['refusal', 'keyword', 'sentiment'];
+// Reasoning effort sent with every request. 'default' sends nothing: the model thinks as it ships.
+export const REASONING_EFFORTS = ['default', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
 
 export const DEFAULTS = Object.freeze({
-  title: 'Identity swap',
   prompts: [],
   system: '',
   variables: {},
@@ -12,20 +13,23 @@ export const DEFAULTS = Object.freeze({
   runs: 1,
   temperature: 0,
   max_tokens: 400,
+  thinking_budget: 8000, // tokens added on top of max_tokens for models that think by default, so thinking cannot starve the reply
+  reasoning: 'default', // see REASONING_EFFORTS
   primary: 'refusal',
   keywords: [],
   keyword_mode: 'any', // any | all
   disparity_threshold: null, // null => 0.25 for rates, 0.3 for sentiment
   seed: null,
-  // presentation only (not part of the ID)
-  labels: null, // { pass, fail } legend overrides
+  // analysis / presentation only (not part of the ID). Card wording is fixed on purpose so images are comparable.
+  sentiment_analyzer: 'builtin', // builtin | afinn | http(s)://url | ./module.js
+  card_title: 'finding', // finding: the generated sentence is the headline · prompt: the prompt is, viewers judge
   share_base: 'llmscope.dev/e/',
 });
 
 // Fields that change what the eval actually does. Everything else is presentation.
 export const CANONICAL_FIELDS = [
   'prompts', 'system', 'variables', 'models', 'runs', 'temperature',
-  'max_tokens', 'primary', 'keywords', 'keyword_mode', 'seed',
+  'max_tokens', 'thinking_budget', 'reasoning', 'primary', 'keywords', 'keyword_mode', 'seed',
 ];
 
 const INLINE_RE = /\{([^{}|]*\|[^{}]*)\}/g; // {black|white}
@@ -62,7 +66,8 @@ export function liftInlineVariants(prompts, variables) {
 }
 
 export function normalizeSpec(input = {}) {
-  const spec = { ...DEFAULTS, ...input };
+  const { title, labels, ...rest } = input || {}; // legacy fields, ignored: card wording is standardized
+  const spec = { ...DEFAULTS, ...rest };
   spec.prompts = asList(spec.prompts).filter(Boolean);
   spec.models = asList(spec.models).filter(Boolean);
   spec.keywords = asList(spec.keywords).filter(Boolean);
@@ -77,11 +82,13 @@ export function normalizeSpec(input = {}) {
   spec.runs = Math.max(1, Math.floor(Number(spec.runs) || 1));
   spec.temperature = Number(spec.temperature) || 0;
   spec.max_tokens = Math.max(1, Math.floor(Number(spec.max_tokens) || DEFAULTS.max_tokens));
+  spec.thinking_budget = Number.isFinite(Number(spec.thinking_budget)) && spec.thinking_budget !== '' && spec.thinking_budget !== null ? Math.max(0, Math.floor(Number(spec.thinking_budget))) : DEFAULTS.thinking_budget;
+  spec.reasoning = REASONING_EFFORTS.includes(spec.reasoning) ? spec.reasoning : DEFAULTS.reasoning;
   spec.primary = PRIMARY_METRICS.includes(spec.primary) ? spec.primary : 'refusal';
   spec.keyword_mode = spec.keyword_mode === 'all' ? 'all' : 'any';
   spec.system = String(spec.system || '');
-  spec.title = String(spec.title || DEFAULTS.title).trim() || DEFAULTS.title;
   if (spec.seed === '' || spec.seed === undefined) spec.seed = null;
+  spec.card_title = spec.card_title === 'prompt' ? 'prompt' : 'finding';
   if (spec.disparity_threshold === '' || spec.disparity_threshold === undefined) spec.disparity_threshold = null;
   if (spec.disparity_threshold !== null) spec.disparity_threshold = Number(spec.disparity_threshold);
   return spec;

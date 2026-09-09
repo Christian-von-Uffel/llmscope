@@ -1,57 +1,34 @@
 // Shareable card: dark grid, models as rows, identity variants as columns, cell fill = share of runs per outcome.
 // Adapted from the treemap card: kicker line, quoted prompt, solid colored tiles, legend, URL bottom-right.
 import { COLORS } from './analyze.js';
+import { measureWidth, wrapText, font as fontStr, FONT_SANS, FONT_MONO } from './text.js';
+import { logoFor } from './logos.js';
 
-const SANS = "'DejaVu Sans', 'Helvetica Neue', Helvetica, Arial, sans-serif";
-const MONO = "'DejaVu Sans Mono', Menlo, Consolas, monospace";
+const SANS = `'${FONT_SANS}', 'Helvetica Neue', Helvetica, Arial, sans-serif`;
+const MONO = `'${FONT_MONO}', Menlo, Consolas, monospace`;
 
 export function esc(s) {
   return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-// Rough glyph widths (em) good enough for wrapping sans-serif bold.
-function textWidth(text, size, bold = false, mono = false) {
-  if (mono) return text.length * 0.6 * size;
-  let w = 0;
-  for (const ch of text) {
-    if (/[ .,:;'|!il]/.test(ch)) w += 0.3;
-    else if (/[mwMW@]/.test(ch)) w += 0.85;
-    else if (/[A-Z]/.test(ch)) w += 0.7;
-    else if (/[0-9]/.test(ch)) w += 0.6;
-    else w += 0.56;
-  }
-  return w * size * (bold ? 1.06 : 1);
+/** Width of text at a size: exact once fonts are loaded (see text.js), estimated before that. */
+export function textWidth(text, size, bold = false, mono = false) {
+  return measureWidth(text, fontStr(size, { bold, mono }));
 }
 
-function wrap(text, size, maxWidth, maxLines, bold = true) {
-  const words = text.split(/\s+/).filter(Boolean);
-  const lines = [];
-  let cur = '';
-  for (const w of words) {
-    const test = cur ? cur + ' ' + w : w;
-    if (textWidth(test, size, bold) <= maxWidth) { cur = test; continue; }
-    if (cur) { lines.push(cur); cur = ''; }
-    if (textWidth(w, size, bold) <= maxWidth) { cur = w; continue; }
-    // a single token wider than the line (URL, hash): hard-break it
-    let chunk = '';
-    for (const ch of w) {
-      if (chunk && textWidth(chunk + ch, size, bold) > maxWidth) { lines.push(chunk); chunk = ''; }
-      chunk += ch;
-    }
-    cur = chunk;
-  }
-  if (cur) lines.push(cur);
+export function wrap(text, size, maxWidth, maxLines, bold = true) {
+  const lines = wrapText(text, fontStr(size, { bold }), maxWidth);
   if (lines.length > maxLines) {
     const kept = lines.slice(0, maxLines);
     let last = kept[maxLines - 1];
-    while (textWidth(last + '…', size, bold) > maxWidth && last.length > 1) last = last.slice(0, -1).trimEnd();
-    kept[maxLines - 1] = last + '…';
+    while (textWidth(last + '...', size, bold) > maxWidth && last.length > 1) last = last.slice(0, -1).trimEnd();
+    kept[maxLines - 1] = last + '\u2026';
     return kept;
   }
   return lines;
 }
 
-function shortModel(id) {
+export function shortModel(id) {
   // "meta-llama/llama-4-maverick:free" -> "llama-4-maverick"
   return id.split('/').pop().split(':')[0];
 }
@@ -65,20 +42,40 @@ export function clamp(min, value, max) {
 // title area; if that is not enough the title borrows height from the grid (rows never go below minRowH)
 // and shrinks to floorSize; only past that does the last line get an ellipsis.
 export const TITLE = { maxSize: 58, minSize: 26, floorSize: 16, lineHeight: 1.12, preferredShare: 0.34, minRowH: 64 };
+// A title reads best at 8-12 words a line (the classic 45-75 character measure), so it takes the fewest lines that
+// keep it at or under the top of that band and then gets the largest size that still wraps to exactly those lines.
+// Long prompts get more lines, not a longer measure. GROW_MAX is how far past the design size that may push a
+// title whose measure leaves room, so a two-word prompt does not swallow the card.
+export const MEASURE = { minWords: 8, maxWords: 12 };
+export const GROW_MAX = 2;
 
-/** Largest size in [minSize, maxSize] whose wrapped lines fit in maxHeight. overflow=true if even minSize does not. */
-export function fitTitleBlock(text, maxWidth, { maxHeight, maxSize = TITLE.maxSize, minSize = TITLE.minSize, lineHeight = TITLE.lineHeight }) {
-  const lo = Math.min(minSize, maxSize);
-  for (let size = maxSize; size >= lo; size -= 1) {
-    const lines = wrap(text, size, maxWidth, Infinity);
-    const height = lines.length * size * lineHeight;
-    if (height <= maxHeight) return { size, lines, height, overflow: false, truncated: false };
-  }
-  const lines = wrap(text, lo, maxWidth, Infinity);
-  return { size: lo, lines, height: lines.length * lo * lineHeight, overflow: true, truncated: false };
+/** Fewest lines that keep the text at or under MEASURE.maxWords a line. */
+export function readableLines(text) {
+  const words = String(text ?? '').trim().split(/\s+/).filter(Boolean).length;
+  return Math.max(1, Math.ceil(words / MEASURE.maxWords));
 }
 
-function fit(text, size, maxWidth, bold = true, minSize = 14, mono = false) {
+/**
+ * Largest size in [minSize, maxSize] whose wrapped lines fit in maxHeight and number no more than maxLines
+ * (readableLines, for a title). At that size the widest line reaches the right edge: one step larger and a word
+ * spills onto another line. overflow=true if even minSize does not fit the height; a text too long for maxLines
+ * at minSize simply takes the lines it needs.
+ */
+export function fitTitleBlock(text, maxWidth, { maxHeight, maxSize = TITLE.maxSize, minSize = TITLE.minSize, lineHeight = TITLE.lineHeight, maxLines = Infinity }) {
+  const at = (size) => { const lines = wrap(text, size, maxWidth, Infinity); return { size, lines, height: lines.length * size * lineHeight, overflow: false, truncated: false }; };
+  const floor = at(Math.min(minSize, maxSize));
+  if (floor.height > maxHeight) return { ...floor, overflow: true };
+  // Both the height and the line count only grow with size, so binary-search the largest whole size that satisfies both.
+  let best = floor;
+  for (let lo = Math.ceil(floor.size) + 1, hi = Math.floor(maxSize); lo <= hi;) {
+    const mid = Math.floor((lo + hi) / 2);
+    const r = at(mid);
+    if (r.height <= maxHeight && r.lines.length <= maxLines) { best = r; lo = mid + 1; } else hi = mid - 1;
+  }
+  return best;
+}
+
+export function fit(text, size, maxWidth, bold = true, minSize = 14, mono = false) {
   let s = size;
   while (textWidth(text, s, bold, mono) > maxWidth && s > minSize) s -= 1;
   return s;
@@ -90,7 +87,7 @@ function signed(x) {
 }
 
 // Highlight {a | b} slots in the title. The slot may wrap across lines, so the "inside a slot" state carries over.
-function titleLine(line, x, y, size, state) {
+export function titleLine(line, x, y, size, state) {
   const spans = [];
   let i = 0;
   while (i < line.length) {
@@ -129,7 +126,7 @@ export function renderCard(a, { width = 1600, height = 1600, url = null, brand =
   const kickerSize = fit(a.title.kicker, 26, W - pad * 2, false, 16);
   parts.push(`<text x="${pad}" y="${y}" font-family="${MONO}" font-size="${kickerSize}" letter-spacing="3" fill="${COLORS.muted}">${esc(a.title.kicker)}</text>`);
 
-  // Prompt title (quoted), clamped so the whole prompt fits. See TITLE / fitTitleBlock above.
+  // Prompt title (quoted), clamped so the whole prompt fits. See TITLE / MEASURE / fitTitleBlock above.
   const quoted = a.title.prompt ? `“${a.title.prompt}”` : '';
   const footerH = 120;
   const gap = 8;
@@ -142,8 +139,9 @@ export function renderCard(a, { width = 1600, height = 1600, url = null, brand =
   const availableH = Math.max(TITLE.floorSize * TITLE.lineHeight, H - footerH - titleTop - moreH - 40 - gridMinH);
   const preferredH = clamp(TITLE.maxSize * TITLE.lineHeight, H * TITLE.preferredShare, availableH);
   const titleWidth = W - pad * 2 - 8;
-  let block = fitTitleBlock(quoted, titleWidth, { maxHeight: preferredH, maxSize: TITLE.maxSize, minSize: TITLE.minSize });
-  if (block.overflow) block = fitTitleBlock(quoted, titleWidth, { maxHeight: availableH, maxSize: TITLE.minSize, minSize: TITLE.floorSize });
+  const measure = readableLines(quoted);
+  let block = fitTitleBlock(quoted, titleWidth, { maxHeight: preferredH, maxSize: TITLE.maxSize * GROW_MAX, minSize: TITLE.minSize, maxLines: measure });
+  if (block.overflow) block = fitTitleBlock(quoted, titleWidth, { maxHeight: availableH, maxSize: TITLE.minSize, minSize: TITLE.floorSize, maxLines: measure });
   if (block.overflow) {
     const maxLines = Math.max(1, Math.floor(availableH / (TITLE.floorSize * TITLE.lineHeight)));
     block = { size: TITLE.floorSize, lines: wrap(quoted, TITLE.floorSize, titleWidth, maxLines), overflow: true, truncated: true };
@@ -184,7 +182,10 @@ export function renderCard(a, { width = 1600, height = 1600, url = null, brand =
     parts.push(`<rect x="${pad}" y="${ry}" width="${labelW}" height="${rowH}" fill="${COLORS.panel}"/>`);
     if (row.flagged) parts.push(`<rect x="${pad}" y="${ry}" width="10" height="${rowH}" fill="${COLORS.accent}"/>`);
     const name = shortModel(row.model);
-    const nameSize = fit(name, Math.min(42, rowH * 0.42), labelW - 48, true, 14);
+    const logo = logoFor(row.model);
+    const logoSize = Math.max(24, Math.min(44, rowH * 0.4));
+    if (logo) parts.push(`<image x="${pad + 26}" y="${(ry + rowH / 2 - logoSize / 2).toFixed(1)}" width="${logoSize}" height="${logoSize}" href="${logo}" opacity="0.9"/>`);
+    const nameSize = fit(name, Math.min(42, rowH * 0.42), labelW - 48 - (logo ? logoSize + 16 : 0), true, 14);
     const nameY = ry + rowH / 2 + (row.flagged && a.variants.length > 1 ? -4 : nameSize / 3);
     parts.push(`<text x="${pad + labelW - 20}" y="${nameY}" text-anchor="end" font-family="${SANS}" font-size="${nameSize}" font-weight="700" fill="${COLORS.text}">${esc(name)}</text>`);
     if (row.flagged && a.variants.length > 1) {
@@ -265,7 +266,7 @@ export function renderCard(a, { width = 1600, height = 1600, url = null, brand =
   }
   const meta = [
     'tile = share of runs',
-    'bar = avg tokens',
+    'bar = avg reply tokens',
     `n=${a.summary.runs_per_cell} per cell`,
     `temp ${a.spec.temperature}`,
     a.variants.length > 1 ? `Δ≥${a.spec.primary === 'sentiment' ? a.threshold : Math.round(a.threshold * 100) + ' pts'} flagged` : null,

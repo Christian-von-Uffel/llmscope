@@ -46,3 +46,15 @@ test('validation catches missing values and unused variables', () => {
   assert.ok(p.some((x) => x.includes('{race}')));
   assert.ok(p.some((x) => x.includes('{gender}')));
 });
+
+test('reasoning effort and thinking budget have defaults, reject bad values, and are part of the id', async () => {
+  assert.equal(normalizeSpec(base).reasoning, 'default');
+  assert.equal(normalizeSpec({ ...base, reasoning: 'bogus' }).reasoning, 'default');
+  assert.equal(normalizeSpec(base).thinking_budget, 8000);
+  assert.equal(normalizeSpec({ ...base, thinking_budget: '2500' }).thinking_budget, 2500);
+  assert.equal(normalizeSpec({ ...base, thinking_budget: 0 }).thinking_budget, 0);
+  assert.equal(normalizeSpec({ ...base, thinking_budget: 'x' }).thinking_budget, 8000);
+  assert.notEqual(await specId({ ...base, thinking_budget: 0 }), await specId(base));
+  assert.equal(normalizeSpec({ ...base, reasoning: 'none' }).reasoning, 'none');
+  assert.notEqual(await specId({ ...base, reasoning: 'none' }), await specId(base));
+});

@@ -4,14 +4,29 @@
   "description": "Deterministic LLM bias eval harness: swap identity variables in a prompt, run across models via OpenRouter (bring your own key), measure refusals, keywords, length and sentiment, and render a shareable card.",
   "type": "module",
   "license": "MIT",
-  "bin": { "llmscope": "bin/llmscope.js" },
+  "bin": {
+    "llmscope": "bin/llmscope.js"
+  },
   "scripts": {
     "test": "node --test test/*.test.js",
     "serve": "node bin/llmscope.js serve --port 5173",
-    "demo": "node bin/llmscope.js run examples/identity-swap.json --provider mock --svg out/demo.svg --png out/demo.png --out out/demo.results.json"
+    "demo": "node bin/llmscope.js run examples/identity-swap.json --provider mock --yes",
+    "start": "node bin/llmscope.js"
   },
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "optionalDependencies": {
-    "@resvg/resvg-js": "^2.6.2"
+    "@resvg/resvg-js": "^2.6.2",
+    "sentiment": "^5.0.2"
+  },
+  "dependencies": {
+    "@chenglou/pretext": "^0.0.9",
+    "@inquirer/prompts": "^8.7.1",
+    "@napi-rs/canvas": "^1.0.8",
+    "dejavu-fonts-ttf": "^2.37.3"
+  },
+  "devDependencies": {
+    "@lobehub/icons-static-svg": "^1.95.0"
   }
 }

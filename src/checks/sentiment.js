@@ -76,3 +76,22 @@ export async function analyzeSentiment(text) {
   const out = await analyzer(text);
   return { score: Number(out.score ?? 0), comparative: Number(out.comparative ?? 0), ...out };
 }
+
+/** AFINN-165 via the optional `sentiment` npm package (Node only). */
+export async function afinnSentiment() {
+  let mod;
+  try { mod = await import('sentiment'); } catch { throw new Error('AFINN analyzer needs the `sentiment` package: npm install sentiment'); }
+  const Sentiment = mod.default || mod;
+  const inst = new Sentiment();
+  return async (text) => {
+    const r = inst.analyze(text || '');
+    return { score: r.score, comparative: r.comparative, positive: r.positive, negative: r.negative, analyzer: 'afinn-165' };
+  };
+}
+
+export const SENTIMENT_CHOICES = [
+  { value: 'builtin', name: 'Built-in lexicon', description: 'Small threat/warmth word list shipped with llmscope. Deterministic, no install.' },
+  { value: 'afinn', name: 'AFINN-165 (sentiment package)', description: 'General-purpose lexicon, ~3,300 words. npm install sentiment.' },
+  { value: 'http', name: 'HTTP service', description: 'POST {text} to a URL you run; it returns {score, comparative}.' },
+  { value: 'module', name: 'JavaScript module', description: 'A file exporting async (text) => ({score, comparative}).' },
+];
