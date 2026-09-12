@@ -5,7 +5,7 @@ const PRIMARY_METRICS = ['refusal', 'keyword', 'sentiment'];
 // Reasoning effort sent with every request. 'default' sends nothing: the model thinks as it ships.
 export const REASONING_EFFORTS = ['default', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
 
-export const DEFAULTS = Object.freeze({
+const DEFAULTS = Object.freeze({
   prompts: [],
   system: '',
   variables: {},

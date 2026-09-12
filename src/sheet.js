@@ -22,10 +22,8 @@ import { sentences, sentenceBatches, SENTENCE_SORTS } from './sentences.js';
 import { esc, wrap, fitTitleBlock, readableLines, shortModel, GROW_MAX, titleLine } from './render.js';
 import { logoBody, providerOf } from './logos.js';
 import { modelColors, contrast } from './palette.js';
-import { font, measureWidth, pinTextWidths, textReady, FONT_SANS, FONT_MONO, FONT_METRICS } from './text.js';
+import { font, measureWidth, pinTextWidths, textReady, SANS, MONO, FONT_METRICS } from './text.js';
 
-const SANS = `'${FONT_SANS}', 'Helvetica Neue', Helvetica, Arial, sans-serif`;
-const MONO = `'${FONT_MONO}', Menlo, Consolas, monospace`;
 
 // The outcome badge before each reply, and each legend swatch, spans the text line's box: ascent to descent at the
 // text size, so it is exactly as tall as the line it starts. In the reply stream it is a placeholder (a no-break
@@ -398,9 +396,13 @@ export function estimateCapacity({ size = 4096, font: f = 28, columns = null } =
 /** The leading the prompt is set with, and so the height of one of its lines. */
 const TITLE_LEADING = 1.12;
 
+/** The brand line's size on a sheet: the share of the image the cards give theirs (26px on 1600), so the three images read as one set. */
+export const BRAND_SCALE = 1 / 60;
+
 function header(a, size, { extraLines = 0, gapLines = 0 } = {}) {
   const pad = Math.round(size * 0.03);
-  const headFont = size / 150;
+  // Sized to the image like the cards' brand line, not to the body text: at 1/150 it was a footnote on a 4096px page.
+  const headFont = size * BRAND_SCALE;
   const quoted = a.title.prompt ? `“${a.title.prompt}”` : '';
   const width = size - pad * 2;
   const maxHeight = size * 0.16;
@@ -550,7 +552,7 @@ export const EXCERPTS = {
  */
 const SHEET_PRESETS = [
   { key: 'full', select: 'all', excerpt: 'full', label: 'Every reply, in full', note: 'the image every run already writes', flags: '' },
-  { key: 'ends', select: 'all', excerpt: 'ends', label: 'Just the first and last sentence of each reply', note: 'how each reply opens and where it lands, across every model', flags: '--excerpt ends' },
+  { key: 'ends', select: 'all', excerpt: 'ends', label: 'Just the first and last sentence of each reply', note: 'how each reply opens and where it lands, across every model · every run writes this one too', flags: '--excerpt ends' },
   { key: 'matched', select: 'matched', excerpt: 'full', label: 'Only the replies that included the keywords', note: 'every word of each, with the matches marked', flags: '--matched' },
   { key: 'matches', select: 'all', excerpt: 'matches', label: 'Only the sentences a marked word turned up in', note: 'the word in the sentence the model built around it', flags: '--excerpt matches' },
   { key: 'refused', select: 'refused', excerpt: 'full', label: 'Only refusals', note: 'what declining looks like, model by model', flags: '--refused' },
@@ -687,10 +689,15 @@ function pushMarked(bag, text, spans, fill, f, { model = null, icon = null, nbsp
 }
 
 /**
- * The replies as flowed text, one paragraph per batch. A group batch opens with the group's name, and names each
- * model where the model changes — provider mark, model, then that model's replies — because a batch holds every
- * model at once and colour alone would ask a reader to keep the legend in their head. A model batch is one model
- * throughout, so it names the group where the group changes and leaves the rest to the badge, as it always has.
+ * The replies, one paragraph each, under a heading per batch.
+ *
+ * Every reply opens with whose it is — the provider's mark and the model's name, in the model's colour — then its
+ * outcome square and its text, so the page is read as a list of models down the column rather than as one block
+ * the names have to be found inside. That is how the sentences page sets its rows, and a reader who has met one
+ * of these images should not have to learn the other. A group batch is headed by the group's name, in the amber
+ * every image here heads a group with and linked to its own view, with the replies set in under it; with no
+ * groups to name there is no heading and the replies start at the column's edge. Batched by model the model
+ * heads the batch and each reply opens with the group it answered instead.
  */
 function paragraphs(responses, analysis, colors, f, terms = [], mode = 'full', sort = 'group') {
   const labelled = analysis.variants.length > 1 || analysis.variants[0]?.label !== '—';
@@ -703,35 +710,32 @@ function paragraphs(responses, analysis, colors, f, terms = [], mode = 'full', s
   }
   const out = [];
   const nbspWidth = measureWidth(NBSP, font(f));
+  // The heading is set a step above the page, as the sentences page sets its own, so reading order runs prompt,
+  // batch, model, reply: at one size the heading and the names are the same weight and nothing ranks them.
+  const hs = Math.round(f * HEADING_SCALE * 10) / 10;
+  const indent = f * 1.1;
   for (const [key, rs] of batches) {
-    const bag = itemBag(f);
-    const { push } = bag;
-    let lastCell = null;
-    let lastModel = null;
+    const headed = byGroup ? labelled : true;
+    if (headed) {
+      const head = itemBag(f);
+      if (byGroup) head.push(rs[0].variantLabel, COLORS.accent, { bold: true, size: hs, link: `#${groupId(key, analysis)}` });
+      else head.push(NBSP + shortModel(key), colors[key], { bold: true, size: hs, logo: key, model: key, extraWidth: iconAdvance(hs) - measureWidth(NBSP, font(hs)) });
+      // The heading keeps the first lines of the first reply with it, so it never ends a column on its own.
+      out.push(head.paragraph(key, { model: byGroup ? null : key, group: byGroup ? key : null, keep: 2 }));
+    }
     rs.forEach((r, i) => {
       const color = colors[r.model];
-      if (byGroup) {
-        // The batch opens with the group it is a batch of, and that name is also the way into it: a link to its
-        // own view, so a click at page size zooms to where the batch starts.
-        if (i === 0 && labelled) push(r.variantLabel + ' ', COLORS.accent, { bold: true, link: `#${groupId(r.variantKey, analysis)}` });
-        else if (i > 0) push(' ', color);
-        // Named where the model changes, not on every reply: a model's replies are consecutive inside a batch, so
-        // the name introduces the run of them and the badge goes on marking each one. A no-break space holds the
-        // mark's width, so the mark, the model and its first word wrap as one.
-        if (r.model !== lastModel) {
-          push(NBSP + shortModel(r.model) + ' ', color, { bold: true, logo: r.model, model: r.model, extraWidth: iconAdvance(f) - nbspWidth });
-          lastModel = r.model;
-        }
-      } else if (r.variantKey !== lastCell) {
-        if (lastCell !== null) push('   ', color);
-        if (labelled) push(r.variantLabel + ' ', COLORS.accent, { bold: true });
-        lastCell = r.variantKey;
-      } else push(' ', color); // a space before the square: the break opportunity that lets it wrap with its word
+      const bag = itemBag(f);
+      // A no-break space holds the mark's width, so the mark, the name and the first word wrap as one.
+      if (byGroup) bag.push(NBSP + shortModel(r.model) + ' ', color, { bold: true, logo: r.model, model: r.model, extraWidth: iconAdvance(f) - nbspWidth });
+      else if (labelled) bag.push(r.variantLabel + ' ', COLORS.accent, { bold: true });
       const { text, fill } = replyText(r, color, mode, terms);
       // the reply's first item carries its square, in the space reserved by extraWidth
       pushMarked(bag, text, findKeywordSpans(text, terms), fill, f, { model: r.model, icon: outcomeOf(r), nbspWidth });
+      // Replies under one heading are one list, so the gap between them is a share of the page's paragraph gap;
+      // the first sits closest to the heading it belongs to.
+      out.push(bag.paragraph(`${key}:${i}`, { model: byGroup ? null : key, group: byGroup ? key : null, indent: headed ? indent : 0, gapScale: headed ? (i ? 0.4 : 0.25) : 0.6 }));
     });
-    out.push(bag.paragraph(key, { model: byGroup ? null : key, group: byGroup ? key : null }));
   }
   return out;
 }
@@ -860,7 +864,10 @@ export function renderResponseSheet(run, { size = 4096, maxFont = null, minFont 
   const excerptMode = EXCERPTS[mode] ? mode : 'full';
   const leg = legend(a, size, colors, shareUrl, sheetNoteParts(terms, excerptMode));
   const best = fitPage((f, colW) => linesAt(responses, a, colors, f, colW, terms, excerptMode, sort), { size, headerH: head.headerH, legendH: leg.height, columns, minFont, maxFont });
-  const svg = pinTextWidths(renderSvg(best, { a, size, select, responses: responses.length, run, shareUrl, colors, head, leg, sort }));
+  // The ends image is its own image, and its brand line says so: a reader who meets it alone should not take it
+  // for the sheet with the replies cut short by accident.
+  const kind = excerptMode === 'ends' ? 'first and last sentences' : 'responses';
+  const svg = pinTextWidths(renderSvg(best, { a, size, select, responses: responses.length, run, shareUrl, colors, head, leg, sort, kind }));
   return { svg, font: best.f, columns: best.g.columns, replies: responses.length, exact: textReady(), fill: columnFill(best.placed, best.g), highlight: terms, excerpt: excerptMode, sort };
 }
 
@@ -1186,7 +1193,8 @@ function renderSvg({ f, g, placed }, { a, size, select, responses, run, shareUrl
   // the three images this is. All three come out of one run, and a reader who meets any of them alone should be
   // told the same thing about what it measures. The finding that used to sit here belongs on the card; this page
   // is the replies themselves, and it says so.
-  p.push(`<text x="${g.pad}" y="${y}" font-family="${MONO}" font-size="${headFont}" font-weight="700" letter-spacing="2" fill="${COLORS.muted}">${esc(`${brandLine(a)} · ${kind}`)}</text>`);
+  // Tracked the way the cards track theirs — 2px at 26px — scaled with the size rather than fixed at 2px.
+  p.push(`<text x="${g.pad}" y="${y.toFixed(1)}" font-family="${MONO}" font-size="${headFont.toFixed(1)}" font-weight="700" letter-spacing="${(headFont * 2 / 26).toFixed(1)}" fill="${COLORS.muted}">${esc(`${brandLine(a)} · ${kind}`)}</text>`);
   const state = { inSlot: false };
   for (const line of block.lines) {
     y += block.size * TITLE_LEADING;

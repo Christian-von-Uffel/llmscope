@@ -1,5 +1,6 @@
 // Run an eval: expand jobs, shuffle deterministically, call the provider with bounded concurrency, apply checks.
 import { normalizeSpec, validateSpec, buildJobs, specId, canonicalSpec } from './spec.js';
+import { freshId, isValidId } from './id.js';
 import { seededShuffle } from './rng.js';
 import { runChecks } from './checks/index.js';
 import { detectRefusal } from './checks/refusal.js';
@@ -7,6 +8,11 @@ import { detectKeywords } from './checks/keywords.js';
 
 const VERSION = 'llmscope/0.1';
 
+/**
+ * What running a spec would do, before anything is sent. `id` is the eval's: content-addressed, so the same spec
+ * plans to the same ID however many times it is planned. The run itself is given a different, fresh ID when it
+ * starts (see runEval), because a run is one generation of replies and a second generation is a second run.
+ */
 export async function planRun(input) {
   const spec = normalizeSpec(input);
   const problems = validateSpec(spec);
@@ -25,11 +31,14 @@ export async function planRun(input) {
  * @param {(event:{type:string, done:number, total:number, result?:object}) => void} [opts.onProgress]
  * @param {AbortSignal} [opts.signal]
  * @param {Function} [opts.judge]
+ * @param {string} [opts.id] the run's own ID, when the caller minted one to show before starting; a fresh one otherwise
  */
-export async function runEval(input, { provider, concurrency = 4, onProgress = () => {}, signal, judge = null } = {}) {
+export async function runEval(input, { provider, concurrency = 4, onProgress = () => {}, signal, judge = null, id: givenId = null } = {}) {
   if (!provider) throw new Error('runEval needs a provider');
-  const { spec, id, problems, jobs, order } = await planRun(input);
+  const { spec, id: spec_id, problems, jobs, order } = await planRun(input);
   if (problems.length) throw new Error('Invalid spec: ' + problems.join(' '));
+  // Every run is its own generation: the same eval run twice is two runs, under two IDs, and neither is lost.
+  const id = isValidId(givenId) ? givenId : await freshId(spec_id);
   const total = jobs.length;
   const results = new Array(total);
   let done = 0;
@@ -89,6 +98,7 @@ export async function runEval(input, { provider, concurrency = 4, onProgress = (
   return {
     version: VERSION,
     id,
+    spec_id, // the eval this is a run of: evals/<spec_id>.json reruns it
     spec,
     provider: provider.name,
     started_at,

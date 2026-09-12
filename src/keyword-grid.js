@@ -2,11 +2,8 @@
 // every (model, group) cell. Pool the models and you have the table's columns; pool the terms and you have which
 // group the words land on hardest. Keeping both is what the card draws, and computing it once is what keeps the
 // table and the card from ever disagreeing.
-import { analyze, defaultThreshold } from './analyze.js';
+import { analyze, defaultThreshold, replyBody } from './analyze.js';
 import { findKeywordSpans, stripPattern } from './checks/keywords.js';
-
-/** What a term is matched against: an error is not the model's wording, but it is what came back. */
-export const replyText = (r) => (r.error ? `ERROR: ${r.error}` : r.text || '');
 
 const rate = (replies, n) => (n ? replies / n : 0);
 const spread = (values) => (values.length > 1 ? Math.max(...values) - Math.min(...values) : null);
@@ -35,7 +32,7 @@ export function keywordGrid(run, terms, { results = run.results, familyOf = (m) 
   for (const r of results) {
     const key = `${r.model}|${r.variantLabel}`;
     if (!texts.has(key)) texts.set(key, []);
-    texts.get(key).push(replyText(r));
+    texts.get(key).push(replyBody(r));
   }
   const at = (model, variant) => texts.get(`${model}|${variant}`) || [];
   const anyOf = (list) => list.filter((t) => findKeywordSpans(t, terms).length).length;

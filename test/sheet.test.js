@@ -54,16 +54,15 @@ test('everything lands on one image, measured exactly; fewer replies grow the te
   assert.equal(all.exact, true);
   assert.ok(all.font >= 6 && all.font <= 90, String(all.font));
   assert.ok(all.svg.includes('llmscope · refusal rate · responses') && !all.svg.includes('│') && !all.svg.includes('page '));
-  // A group batch holds every model at once, so each model is named where it comes up: the provider's mark, then
-  // the model, then its replies. Sorted by model instead, a batch is one model throughout and the legend is the
-  // only place its name is written. (The link plumbing around that name is not drawn text, so it is measured out.)
+  // Every reply is its own line and opens with whose it is: the provider's mark, the model, then the reply.
+  // Sorted by model instead, the model heads its batch once and the replies under it open with the wording.
+  // (The link plumbing around a name is not drawn text, so it is measured out.)
   const drawn = (svg) => [...svg.matchAll(/>([^<]*)<\/text>/g)].map((m) => m[1]).join('\n');
-  const cells = models.length * selectResponses(run).analysis.variants.length;
-  assert.equal([...all.svg.matchAll(/<use href="#logo-/g)].length, cells, 'one mark per model per batch, not per reply');
+  assert.equal([...all.svg.matchAll(/<use href="#logo-/g)].length, all.replies, 'a mark per reply: every line names its model');
   for (const m of models) assert.ok(drawn(all.svg).split(m.split('/').pop()).length > 2, `${m} names its own replies`);
   const byModel = renderResponseSheet(run, { size: 4096, sort: 'model' });
-  assert.equal(byModel.svg.includes('<use href="#logo-'), false, 'a model batch needs no mark: it is all one model');
-  for (const m of models) assert.equal(drawn(byModel.svg).split(m.split('/').pop()).length, 2, `${m} appears once, in the legend`);
+  assert.equal([...byModel.svg.matchAll(/<use href="#logo-/g)].length, models.length, 'a model batch is headed once, by its model');
+  for (const m of models) assert.equal(drawn(byModel.svg).split(m.split('/').pop()).length, 3, `${m} appears twice: heading its batch, and in the legend`);
   const few = renderResponseSheet(run, { size: 4096, select: 'per-cell' });
   assert.ok(few.font > all.font, `fewer replies → larger text (${few.font} vs ${all.font})`);
   assert.equal(renderResponseSheets(run, { size: 1600 }).length, 1, 'compatibility wrapper is always one page');
@@ -111,10 +110,10 @@ test('a reply the limit cut off shows all of its text and ends in an ellipsis; e
   const rects = [...svg.matchAll(/<rect x="([\d.]+)" y="([\d.]+)" width="([\d.]+)" height="([\d.]+)" rx="[\d.]+" fill="#[0-9a-f]{6}"\/>/g)];
   const texts = [...svg.matchAll(/<text x="([\d.]+)" y="([\d.]+)"/g)];
   const body = rects.filter((m) => m[3] === side);
-  // An outcome badge for each of the two replies, and one provider mark introducing the model that gave them —
-  // here a plain square, because this run's provider has no mark of its own. Each spans the line's box and each
-  // is followed by its word.
-  assert.equal(body.length, 3, 'a badge per reply, and one mark for the model they share');
+  // An outcome badge for each of the two replies, and a provider mark opening each of them — here a plain square,
+  // because this run's provider has no mark of its own. Every reply is its own line and names its model, so the
+  // mark comes once per reply. Each spans the line's box and each is followed by its word.
+  assert.equal(body.length, 4, 'a badge and a mark per reply');
   for (const [, x, y, w, h] of body) {
     assert.equal(w, h);
     const word = texts.find(([, tx, ty]) => Math.abs(Number(tx) - Number(x) - iconAdvance(f)) < 0.11 && Math.abs(Number(ty) - Number(y) - f * FONT_METRICS.ascent) < 0.11);
@@ -438,12 +437,11 @@ test('the provider mark is defined once and worn in each model\'s own colour', (
   const colors = modelColors(models);
   const worn = new Set([...sheet.svg.matchAll(/<use href="#logo-[a-z0-9-]+" xlink:href="[^"]*" fill="(#[0-9a-f]{6})"/g)].map((m) => m[1]));
   assert.deepEqual([...worn].sort(), [...new Set(models.map((m) => colors[m]))].sort(), 'a mark in every model colour, and no other');
-  // Eighty replies, sixteen marks, eight providers: the artwork is shared, and so is the introduction.
+  // Eighty replies, eighty marks, eight providers: the artwork is defined once and worn on every line.
   const defs = [...sheet.svg.matchAll(/<g id="logo-([a-z0-9-]+)" fill-rule="evenodd">/g)].map((m) => m[1]);
   assert.deepEqual(defs.sort(), [...new Set(models.map((m) => m.split('/')[0]))].sort());
   const marks = [...sheet.svg.matchAll(/<use href="#logo-/g)].length;
-  assert.equal(marks, models.length * selectResponses(run).analysis.variants.length, 'one mark per model per batch');
-  assert.ok(marks < selectResponses(run).responses.length, 'a model that answers five times is named once');
+  assert.equal(marks, selectResponses(run).responses.length, 'one mark per reply: every line opens with its model');
 });
 
 test('a name that has to wrap does not drag the reply after it: the space held for a mark is charged once', async () => {

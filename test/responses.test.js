@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { RESPONSE_FILTERS, filterResponses, parseSearch, replyBody, shownText, markSpans, toCsv, toJson } from '../src/responses.js';
-import { outcomeOf } from '../src/analyze.js';
+import { RESPONSE_FILTERS, filterResponses, parseSearch, shownText, markSpans, toCsv, toJson } from '../src/responses.js';
+import { outcomeOf, replyBody } from '../src/analyze.js';
 import { SELECTIONS } from '../src/sheet.js';
 
 /** A small run, hand-built so each reply is one known shape: an answer, a match, a refusal, an error, a cut-off. */

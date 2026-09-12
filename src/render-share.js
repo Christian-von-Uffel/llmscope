@@ -1,11 +1,9 @@
 // Share card: one finding in words, one number per cell, nothing that dies at thumbnail size.
 import { COLORS, keywordPhrase, noKeywordsYet, METRIC_LABEL, brandLine, countedLine, runsLine } from './analyze.js';
-import { esc, textWidth, wrap, fit, shortModel, clamp, fillLastLine, promptBlock, TITLE, GROW_MAX } from './render.js';
-import { pinTextWidths } from './text.js';
+import { esc, textWidth, wrap, fit, shortModel, clamp, fillLastLine, promptBlock, TITLE, GROW_MAX, monthStamp } from './render.js';
+import { pinTextWidths, SANS, MONO } from './text.js';
 import { logoFor } from './logos.js';
 
-const SANS = "'DejaVu Sans', 'Helvetica Neue', Helvetica, Arial, sans-serif";
-const MONO = "'DejaVu Sans Mono', Menlo, Consolas, monospace";
 /** A value as the card quotes it, empty included. Shared with the keyword card so the two never disagree. */
 export const quoted = (s) => `“${s === '' ? 'none' : s}”`;
 
@@ -54,10 +52,7 @@ function cellWords(cell, primary) {
   return `${count}/${cell.n}`;
 }
 
-export function monthStamp(iso) {
-  const d = iso ? new Date(iso) : new Date();
-  return d.toLocaleString('en-US', { month: 'short', year: 'numeric' }).toUpperCase();
-}
+export { monthStamp };
 
 /** Neutral line for prompt-title cards: what was run, not what was found. */
 export function setupLine(a) {
@@ -78,6 +73,9 @@ export function setupLine(a) {
  *   finding is stated, so viewers draw their own conclusion from what was asked and what came back.
  *   finding: the generated sentence is the headline and the first prompt is quoted small below it.
  */
+/** The design size of the prompt heading; a short prompt may grow to GROW_MAX times it and no further. */
+export const SHARE_TITLE_SIZE = 64;
+
 export function renderShareCard(a, { width = 1600, height = 1600, names = {}, url = null, date = null, title = 'prompt' } = {}) {
   const W = width; const H = height; const pad = 64;
   const shareUrl = url || `${a.spec.share_base || ''}${a.id}`;
@@ -125,7 +123,7 @@ export function renderShareCard(a, { width = 1600, height = 1600, names = {}, ur
     const availableH = Math.max(TITLE.floorSize * TITLE.lineHeight, Math.min(H * 0.40, gridBottom - y - 44 - subH - gridMinH));
     const block = promptBlock(a.title.prompts, {
       x: pad, y, maxWidth: maxW, maxHeight: availableH, preferredHeight: Math.min(H * 0.28, availableH),
-      slots: a.title.slots, maxSize: 64 * GROW_MAX,
+      slots: a.title.slots, maxSize: SHARE_TITLE_SIZE * GROW_MAX,
     });
     parts.push(...block.svg);
     // Grey, and not the accent or the body white: the prompt above sets its slots in amber and the rest in white,

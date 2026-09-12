@@ -6,15 +6,16 @@ import http from 'node:http';
 import { spawn, execFileSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { planRun, runEval, rescoreRun } from '../src/engine.js';
-import { analyze, totalTokens, defaultThreshold, outcomeOf } from '../src/analyze.js';
-import { renderCard, shortModel, signed } from '../src/render.js';
+import { analyze, totalTokens, defaultThreshold, outcomeOf, replyBody } from '../src/analyze.js';
+import { shortModel, signed } from '../src/render.js';
 import { renderShareCard } from '../src/render-share.js';
 import { renderKeywordCard } from '../src/render-keywords.js';
 import { renderResponseSheet, renderSentenceSheet, sentenceCount, selectResponses, excerpt as excerptOf, sheetPresets, SELECTIONS, EXCERPTS, SORTS, SENTENCE_SORTS, SENTENCE_LAYOUTS, SENTENCE_VOICES, SENTENCE_DEFAULTS, MARK_STYLES } from '../src/sheet.js';
-import { filterResponses, toCsv, toJson, replyBody } from '../src/responses.js';
+import { filterResponses, toCsv, toJson } from '../src/responses.js';
 import { shareText, altText, PLATFORM_MAX_BYTES } from '../src/share.js';
 import { ensureText, fontFilePaths, FONT_SANS } from '../src/text.js';
 import { usedVariables, normalizeSpec, specId, strayBraces, isSlotToken, defaultCardTitle, displayTemplate, REASONING_EFFORTS } from '../src/spec.js';
+import { freshId } from '../src/id.js';
 import { createOpenRouterProvider, checkKey, maskKey } from '../src/providers/openrouter.js';
 import { createMockProvider } from '../src/providers/mock.js';
 import { setSentimentAnalyzer, resetSentimentAnalyzer, httpSentiment, afinnSentiment, SENTIMENT_CHOICES } from '../src/checks/sentiment.js';
@@ -400,9 +401,12 @@ async function writeSheet(run, file, { select = 'all', size = 4096, maxFont = nu
   }
   const { svg, font, columns: cols, replies, exact, highlight: terms } = renderResponseSheet(run, { size, maxFont: maxFont || null, columns, select, url, highlight: marking, excerpt, sort });
   const base = file.replace(/\.results\.json$/, '');
-  const svgPath = `${base}.responses.svg`;
+  // The ends of every reply are an image of their own, written by every run beside the full sheet. Every other
+  // selection or excerpt redraws the responses image, as it always has.
+  const kind = excerpt === 'ends' && select === 'all' ? 'ends' : 'responses';
+  const svgPath = `${base}.${kind}.svg`;
   await fs.writeFile(svgPath, svg);
-  const raster = png ? await pngFromSvg(svg, `${base}.responses.png`, { maxBytes: PLATFORM_MAX_BYTES }) : null;
+  const raster = png ? await pngFromSvg(svg, `${base}.${kind}.png`, { maxBytes: PLATFORM_MAX_BYTES }) : null;
   const pngPath = raster?.path || null;
   // The SVG is the sheet you read and the PNG is the sheet you post. Only the SVG carries the links — a model
   // name jumps to that model's replies, the background jumps back out, the URL opens the eval — and it is text,
@@ -502,20 +506,17 @@ async function writeSentenceSheet(run, file, { select = 'all', sort = 'group', m
   return { path: svgPath, png: pngPath, svg: svgPath, ...page };
 }
 
-async function writeOutputs(run, { outDir = 'out', out, svg, png, url, title, detail = false, highlight, excerpt = 'full', sort = 'group' } = {}) {
+async function writeOutputs(run, { outDir = 'out', out, svg, png, url, title, highlight, excerpt = 'full', sort = 'group' } = {}) {
   markedTerms(run, highlight); // before the run is written out, so the results file carries the edit
   const a = analyze(run);
   const mode = titleMode(title, run.spec.card_title || defaultCardTitle(run.spec.primary));
-  const svgText = detail
-    ? renderCard(a, { url: url || null })
-    : renderShareCard(a, { url: url || null, names: namesMap(), date: run.finished_at, title: mode });
+  const svgText = renderShareCard(a, { url: url || null, names: namesMap(), date: run.finished_at, title: mode });
   await fs.mkdir(outDir, { recursive: true });
-  const suffix = detail ? '.detail' : '';
   const paths = {
     json: out || path.join(outDir, `${run.id}.results.json`),
-    svg: svg || path.join(outDir, `${run.id}${suffix}.svg`),
-    png: png === false ? null : png || path.join(outDir, `${run.id}${suffix}.png`),
-    mode: detail ? 'detail' : mode,
+    svg: svg || path.join(outDir, `${run.id}.svg`),
+    png: png === false ? null : png || path.join(outDir, `${run.id}.png`),
+    mode,
   };
   await fs.writeFile(paths.json, JSON.stringify(run, null, 2));
   await fs.writeFile(paths.svg, svgText);
@@ -528,7 +529,13 @@ async function writeOutputs(run, { outDir = 'out', out, svg, png, url, title, de
   const sheet = await writeSheet(run, paths.json, { png: png !== false, url, log: false, excerpt, sort });
   paths.sheet = sheet.path;
   paths.sheetPng = sheet.png;
-  // Third image, when there are words to compare: the rate of each one by group and by model. A run with no
+  // Third image: the first and last sentence of every reply, so where twenty models each opened and landed can be
+  // read side by side without the whole of any reply in the way. The full sheet is for reading one reply; this
+  // one is for comparing all of them.
+  const ends = await writeSheet(run, paths.json, { png: png !== false, url, log: false, excerpt: 'ends', sort });
+  paths.ends = ends.path;
+  paths.endsPng = ends.png;
+  // Fourth image, when there are words to compare: the rate of each one by group and by model. A run with no
   // marked words has nothing to put on it, so it is written only when there is.
   const terms = markedTerms(run);
   const keywords = terms.length && a.variants.length ? await writeKeywordCard(run, paths.json, { terms, url, png: png !== false, log: false }) : null;
@@ -571,6 +578,9 @@ async function execute(inputSpec, args = {}) {
   spec.models = chooseModels(spec, args, list);
   let plan = await planRun(spec);
   if (plan.problems.length) throw new Error('Invalid eval:\n - ' + plan.problems.join('\n - '));
+  // The run's own id, minted now so the review names the files the run will write. It is not the eval's id: that
+  // one is content-addressed and names the file in evals/, and the same eval run twice is two runs, two ids.
+  const runId = await freshId(plan.id);
   const provider = await buildProvider(args);
   const review = () => {
     const variants = plan.jobs.length / plan.spec.prompts.length / plan.spec.models.length / plan.spec.runs;
@@ -581,7 +591,7 @@ async function execute(inputSpec, args = {}) {
       costLine = list.length ? `est. ≈${formatUsd(cost.typical)} ${dim(`(up to ${formatUsd(cost.high)} if every reply used its whole budget)`)}` : 'cost unknown (model list unavailable)';
       if (cost.unknown.length) costLine += red(` · not on OpenRouter: ${cost.unknown.join(', ')}`);
     }
-    printReview(plan, provider, shape, costLine, specTarget(plan, args));
+    printReview(plan, provider, shape, costLine, specTarget(plan, args), runId);
   };
   review();
   if (TTY && !args.yes) {
@@ -640,9 +650,9 @@ async function execute(inputSpec, args = {}) {
   }
   const analyzerName = await applySentiment(spec.sentiment_analyzer);
   const judge = args.judge ? createJudge(provider, { model: typeof args.judge === 'string' ? args.judge : undefined }) : null;
-  const run = await runEval(spec, { provider, judge, concurrency: Number(args.concurrency) || 4, onProgress: progressWriter(plan.jobs.length) });
+  const run = await runEval(spec, { provider, judge, id: runId, concurrency: Number(args.concurrency) || 4, onProgress: progressWriter(plan.jobs.length) });
   run.sentiment_analyzer = analyzerName;
-  const { analysis, paths, sheet, keywords } = await writeOutputs(run, { outDir: args['out-dir'] || 'out', out: args.out, svg: args.svg, png: args.png === 'none' ? false : args.png, url: args.url, detail: Boolean(args.detail), highlight: highlightTerms(args), excerpt: excerptMode(args), sort: sortMode(args) });
+  const { analysis, paths, sheet, keywords } = await writeOutputs(run, { outDir: args['out-dir'] || 'out', out: args.out, svg: args.svg, png: args.png === 'none' ? false : args.png, url: args.url, highlight: highlightTerms(args), excerpt: excerptMode(args), sort: sortMode(args) });
   printSummary(analysis);
   printProblems(run);
   // Running a file on other models leaves that file alone and writes the eval it actually ran, so it can be rerun.
@@ -653,20 +663,20 @@ async function execute(inputSpec, args = {}) {
     await fs.writeFile(target.file, JSON.stringify(spec, null, 2));
   }
   void keywords;
-  console.log(`\nshare: ${bold(plan.spec.share_base + plan.id)}   rerun: llmscope run ${target.file}`);
-  console.log(`results:   ${paths.json}   ${dim(`browse: llmscope results ${plan.id}`)}\ncard:      ${paths.png || paths.svg}   ${dim(`title: ${paths.mode} · post this one`)}\nresponses: ${paths.sheet}   ${dim(`${sheet.replies} replies · ${sheet.note}${sheet.highlight.length ? ` · highlighting ${sheet.highlight.join(', ')}` : ''} · ${SHEET_LINKS}`)}${paths.keywords ? `\nkeywords:  ${paths.keywords}   ${dim(`${keywordSummary(analysis, run)} · post this beside the card`)}` : ''}\nalt text:  ${paths.share}   ${dim('alt text and caption to paste with the card')}`);
+  console.log(`\nshare: ${bold(plan.spec.share_base + run.id)}   rerun: llmscope run ${target.file}`);
+  console.log(`results:   ${paths.json}   ${dim(`browse: llmscope results ${run.id}`)}\ncard:      ${paths.png || paths.svg}   ${dim(`title: ${paths.mode} · post this one`)}\nresponses: ${paths.sheet}   ${dim(`${sheet.replies} replies · ${sheet.note}${sheet.highlight.length ? ` · highlighting ${sheet.highlight.join(', ')}` : ''} · ${SHEET_LINKS}`)}\nends:      ${paths.ends}   ${dim('the first and last sentence of every reply · how each model opens and where it lands')}${paths.keywords ? `\nkeywords:  ${paths.keywords}   ${dim(`${keywordSummary(analysis, run)} · post this beside the card`)}` : ''}\nalt text:  ${paths.share}   ${dim('alt text and caption to paste with the card')}`);
   // Printed, not just written: the alt field is filled in at the moment of posting, and that is the terminal.
   console.log(`\n${bold('alt text')} ${dim('(paste into the image description field)')}\n${altText(analysis, { names: namesMap() })}`);
   if (TTY && !args.yes) await afterRun(run, paths, { outDir: args['out-dir'] || 'out', specSaved: saved, analysis, args });
   return run;
 }
 
-function printReview(plan, provider, shape, costLine, spec_file = { file: null, changed: true }) {
+function printReview(plan, provider, shape, costLine, spec_file = { file: null, changed: true }, runId = plan.id) {
   const spec = plan.spec;
   // A slot named in words is a wide label; widen the whole column for it rather than let one row jut out.
   const pad = Math.min(26, Math.max(9, ...Object.keys(spec.variables).map((n) => n.length + 2)));
   const kv = (k, v) => console.log(`  ${dim(k.padEnd(pad))} ${v}`);
-  console.log(`\n${bold('Review')}  ${dim('id ' + plan.id + (provider.name === 'mock' ? ' · mock data' : ''))}`);
+  console.log(`\n${bold('Review')}  ${dim('id ' + runId + (provider.name === 'mock' ? ' · mock data' : ''))}`);
   const measure = spec.primary === 'keyword'
     ? `keyword inclusion — response contains ${spec.keyword_mode === 'all' ? 'all of' : 'any of'}: ${spec.keywords.join(', ')}`
     : spec.primary === 'sentiment' ? `sentiment — analyzer: ${spec.sentiment_analyzer}` : 'refusal rate per wording';
@@ -679,7 +689,8 @@ function printReview(plan, provider, shape, costLine, spec_file = { file: null, 
   kv('models', `${spec.models.length}: ${spec.models.map(shortModel).join(', ')}`);
   kv('settings', `${spec.runs} run${spec.runs > 1 ? 's' : ''} per cell · temperature ${spec.temperature} · max reply ${spec.max_tokens} tokens · thinking budget ${spec.thinking_budget} on top for models that think · reasoning ${spec.reasoning}`);
   kv('requests', `${plan.jobs.length}  ${dim(shape)}  ${costLine}`);
-  kv('outputs', `out/${plan.id}.{results.json,svg,png} · spec ${spec_file.changed ? 'saved to' : 'from'} ${spec_file.file || `evals/${plan.id}.json`}`);
+  // The run's files carry the run's id; the eval file carries the eval's, so a rerun lands beside this run, not on it.
+  kv('outputs', `out/${runId}.{results.json,svg,png} · spec ${spec_file.changed ? 'saved to' : 'from'} ${spec_file.file || `evals/${plan.id}.json`}`);
 }
 
 function printRequests(plan) {
@@ -745,6 +756,7 @@ function runIdentity(run) {
   return {
     ...specIdentity(run.spec || {}),
     id: run.id,
+    eval: run.spec_id || null, // the eval this run is a generation of; runs saved before runs had their own ids carry none
     when: run.finished_at || run.started_at || '',
     n: (run.results || []).length,
     mock: run.provider === 'mock',
@@ -779,7 +791,7 @@ function swapHint(file, r) {
 
 /** Everything typed into a run, as one searchable string for --find. Slot values count: `{v1}` is not what people type. */
 const runHaystack = (r) => [
-  r.id, r.prompt, shownPrompt(r), r.check, r.keywords.join(' '), r.slots.join(' '),
+  r.id, r.eval || '', r.prompt, shownPrompt(r), r.check, r.keywords.join(' '), r.slots.join(' '),
   Object.values(r.variables || {}).flat().join(' '), r.models.join(' '), r.kicker,
 ].join(' ').toLowerCase();
 
@@ -811,7 +823,11 @@ async function loadRun(file, { quiet = false } = {}) {
 async function findResults(ref, outDir = 'out') {
   if (ref.endsWith('.json')) return ref;
   const file = path.join(outDir, `${ref}.results.json`);
-  try { await fs.access(file); return file; } catch { throw new Error(`no results for "${ref}" (looked for ${file}). \`llmscope results\` lists runs.`); }
+  try { await fs.access(file); return file; } catch {}
+  // An eval's id names its file in evals/, not a run; given one, the newest run of that eval is what is meant.
+  const ofEval = (await listRuns(outDir)).find((r) => r.eval === ref);
+  if (ofEval) { console.error(dim(`${ref} is an eval; showing its newest run, ${ofEval.id}`)); return ofEval.file; }
+  throw new Error(`no results for "${ref}" (looked for ${file}). \`llmscope results\` lists runs.`);
 }
 
 /**
@@ -1623,18 +1639,17 @@ async function afterRun(run, paths, { outDir = 'out', specSaved = false, analysi
         { value: 'card', name: 'Open the results card', disabled: paths.png ? false : '(no PNG)' },
         { value: 'title', name: mode === 'finding' ? 'Switch the results card heading to the prompts' : 'Switch the results card heading to the finding (state the result)' },
         { value: 'sheet', name: 'Open the model responses card', description: `every reply on one 4096px image · ${SHEET_LINKS}` },
+        { value: 'edit', name: 'Open the responses in your text editor', description: `every reply as text, to copy, cut and paste · $VISUAL or $EDITOR · later: llmscope results ${run.id} --edit` },
+        { value: 'sentences', name: 'Open the keyword matches in context card', description: `how many matches each wording drew and from which models, each shown in its sentence · later: llmscope sentences ${run.id} [--sort model|keyword]` },
+        { value: 'ends', name: 'Open the first and last sentences card', description: `how each reply opens and where it lands, on one image · written by every run · later: llmscope sheet ${run.id} --excerpt ends` },
+        { value: 'kwcard', name: 'Open the keyword matches card', description: 'each marked word by wording and by model', disabled: paths.keywords?.endsWith('.png') ? false : paths.keywords ? '(no PNG)' : '(this run marks no words)' },
+        { value: 'highlight', name: marked.length ? 'Edit the highlighted words…' : 'Highlight words in the responses image…', description: 'mark every occurrence of terms you name — a word a model used that you want to point at' },
         { value: 'rerun', name: 'Rerun this eval using other models', description: 'the rest of a family, a whole provider, or models you tick' },
         { value: 'reprompt', name: 'Rerun this eval with a different prompt', description: 'reword it, or change the groups, and see whether the result holds' },
-        { value: 'kwcard', name: 'Open the keyword matches card', description: 'each marked word by wording and by model', disabled: paths.keywords?.endsWith('.png') ? false : paths.keywords ? '(no PNG)' : '(this run marks no words)' },
-        { value: 'sentences', name: 'Open the keyword matches in context card', description: `how many matches each wording drew and from which models, each shown in its sentence · later: llmscope sentences ${run.id} [--sort model|keyword]` },
-        { value: 'highlight', name: marked.length ? `Edit highlighted words (${marked.join(', ')})` : 'Highlight words in the responses image…', description: 'mark every occurrence of terms you name — a word a model used that you want to point at' },
         { value: 'responses', name: 'Print model responses', description: `every reply with its verdict · later: llmscope results ${run.id}` },
         { value: 'filtered', name: keyword ? 'Print model responses that included matched keywords' : 'Print only refusals' },
-        { value: 'ends', name: 'Print first and last sentences', description: `how each reply opens and where it lands · later: llmscope results ${run.id} --excerpt ends` },
         { value: 'sheetopts', name: 'Render another responses image…', description: 'just the ends of each reply · only the ones that matched a keyword · only refusals · every word' },
-        { value: 'detail', name: 'Render the detail card (tokens, sentiment, Δ)' },
         { value: 'counts', name: 'Summarize which words turned up where', description: `each marked word against each wording, biggest gap first · later: llmscope results ${run.id} --counts` },
-        { value: 'edit', name: 'Open the responses in your text editor', description: `$VISUAL or $EDITOR · later: llmscope results ${run.id} --edit` },
         { value: 'folder', name: 'Open the results folder', description: paths.json },
         { value: 'done', name: 'Done' },
       ],
@@ -1645,14 +1660,9 @@ async function afterRun(run, paths, { outDir = 'out', specSaved = false, analysi
       run.spec.card_title = mode === 'finding' ? 'prompt' : 'finding';
       const re = await writeOutputs(run, { outDir, out: paths.json, png: paths.png ? undefined : false });
       paths.svg = re.paths.svg; paths.png = re.paths.png;
-      if (specSaved) { try { const f = `evals/${run.id}.json`; const spec = JSON.parse(await fs.readFile(f, 'utf8')); spec.card_title = run.spec.card_title; await fs.writeFile(f, JSON.stringify(spec, null, 2)); } catch {} }
+      if (specSaved) { try { const f = `evals/${run.spec_id || run.id}.json`; const spec = JSON.parse(await fs.readFile(f, 'utf8')); spec.card_title = run.spec.card_title; await fs.writeFile(f, JSON.stringify(spec, null, 2)); } catch {} }
       console.log(`re-rendered with the ${bold(run.spec.card_title)} as title: ${paths.png || paths.svg}`);
       if (paths.png) openFile(paths.png);
-    }
-    if (choice === 'detail') {
-      const re = await writeOutputs(run, { outDir, out: paths.json, detail: true, png: paths.png ? undefined : false });
-      console.log(`detail card: ${re.paths.png || re.paths.svg}`);
-      if (re.paths.png) openFile(re.paths.png);
     }
     if (choice === 'rerun' || choice === 'reprompt') {
       const changes = choice === 'rerun'
@@ -1671,7 +1681,21 @@ async function afterRun(run, paths, { outDir = 'out', specSaved = false, analysi
       return; // the follow-up run has its own menu
     }
     if (choice === 'responses') printResponses(run);
-    if (choice === 'ends') printResponses(run, { excerpt: 'ends' });
+    if (choice === 'ends') {
+      // The ends of every reply on one image: where twenty models each opened and landed, side by side. Every run
+      // writes it, so it is drawn here only if something removed it; the printout of the same is a flag away
+      // (llmscope results <id> --excerpt ends), so the menu offers the picture.
+      try {
+        if (!paths.ends) {
+          const page = await writeSheet(run, paths.json, { excerpt: 'ends', url: args.url || null, png: paths.sheetPng !== null });
+          paths.ends = page.path;
+          paths.endsPng = page.png;
+        }
+        openSheet(paths.ends);
+      } catch (err) {
+        console.log(red(String(err.message || err)));
+      }
+    }
     if (choice === 'filtered') printResponses(run, filterResponses(run, { select: keyword ? 'matched' : 'refused' }));
     if (choice === 'counts') {
       // The table is about words, and a refusal or sentiment eval names none: ask for them rather than refusing.
@@ -1997,7 +2021,7 @@ async function cmdResults(args) {
     const width = Math.max(60, Math.min(process.stdout.columns || 100, 120));
     console.log(`${bold('Runs')} ${dim('in ' + outDir + '/' + (find ? ` matching “${find}”` : ''))}`);
     for (const r of runs) {
-      console.log(`\n  ${amber(r.id)}  ${dim(r.when.slice(0, 16).replace('T', ' '))}  ${runFacts(r)}`);
+      console.log(`\n  ${amber(r.id)}  ${dim(r.when.slice(0, 16).replace('T', ' '))}  ${runFacts(r)}${r.eval ? dim(` · eval ${r.eval}`) : ''}`);
       console.log(`  ${dim(clip(`“${r.prompt}”${r.morePrompts ? ` (+${r.morePrompts} more prompt${r.morePrompts > 1 ? 's' : ''})` : ''}`, width - 4))}`);
       for (const line of slotLines(r, '  ')) console.log(line);
     }
@@ -2180,14 +2204,14 @@ async function rendererStamp() {
 
 /**
  * The images a re-render of this run would rewrite, and when the oldest of them was drawn — so a stale one can be
- * found without opening it. Only those: a detail card nobody asked for, or a landing-page sample another script
+ * found without opening it. Only those: a sentences page asked for once, or a landing-page sample another script
  * builds, is not made current by this command and would otherwise report itself stale on every pass.
  */
-async function imagesOf({ file, id }, { outDir, detail = false }) {
+async function imagesOf({ file, id }, { outDir }) {
   const base = file.replace(/\.results\.json$/, '');
-  const card = path.join(outDir, `${id}${detail ? '.detail' : ''}`);
+  const card = path.join(outDir, id);
   const drawn = (await Promise.all(
-    [`${card}.svg`, `${card}.png`, `${base}.responses.svg`, `${base}.responses.png`, `${base}.keywords.svg`, `${base}.keywords.png`]
+    [`${card}.svg`, `${card}.png`, `${base}.responses.svg`, `${base}.responses.png`, `${base}.ends.svg`, `${base}.ends.png`, `${base}.keywords.svg`, `${base}.keywords.png`]
       .map(async (f) => { try { return (await fs.stat(f)).mtimeMs; } catch { return null; } }),
   )).filter((t) => t !== null);
   return { count: drawn.length, oldest: drawn.length ? Math.min(...drawn) : null };
@@ -2202,7 +2226,7 @@ async function renderAll(args, outDir) {
   const stamp = await rendererStamp();
   const runs = await listRuns(outDir, { find: args.find || '' });
   const aged = [];
-  for (const r of runs) aged.push({ ...r, images: await imagesOf(r, { outDir, detail: Boolean(args.detail) }) });
+  for (const r of runs) aged.push({ ...r, images: await imagesOf(r, { outDir }) });
   // "Stale" is an image older than the code that draws it, which is the case this exists for: a renderer fix
   // lands, and the images already on disk are the ones from before it.
   const stale = aged.filter((r) => !r.images.count || r.images.oldest < stamp);
@@ -2221,7 +2245,7 @@ async function renderAll(args, outDir) {
       const run = await loadRun(r.file, { quiet: true });
       const { paths } = await writeOutputs(run, {
         outDir, out: r.file, png: args.png === 'none' ? false : undefined, url: args.url, title: args.title,
-        detail: Boolean(args.detail), highlight: highlightTerms(args), excerpt: excerptMode(args), sort: sortMode(args),
+        highlight: highlightTerms(args), excerpt: excerptMode(args), sort: sortMode(args),
       });
       console.log(`  ${label}  ${paths.png || paths.svg}   ${dim(clip(shownPrompt(r), 48))}`);
     } catch (e) {
@@ -2235,13 +2259,13 @@ async function renderAll(args, outDir) {
 async function cmdRender(args) {
   const outDir = args['out-dir'] || 'out';
   if (args.all || args.stale) return renderAll(args, outDir);
-  if (!args._[1]) throw new Error('llmscope render <id|results.json> [--title prompt|finding] [--detail] — or --stale to re-render every run whose images predate the current renderer (--all for all of them)');
+  if (!args._[1]) throw new Error('llmscope render <id|results.json> [--title prompt|finding] — or --stale to re-render every run whose images predate the current renderer (--all for all of them)');
   const file = args._[1].endsWith('.json') ? args._[1] : await findResults(args._[1], outDir);
   const run = await loadRun(file);
   await models({ quiet: true }); // display names for the share card; fine without network
-  const { analysis, paths } = await writeOutputs(run, { outDir: path.dirname(file), out: args.out || file, svg: args.svg, png: args.png === 'none' ? false : args.png, url: args.url, title: args.title, detail: Boolean(args.detail), highlight: highlightTerms(args), excerpt: excerptMode(args), sort: sortMode(args) });
+  const { analysis, paths } = await writeOutputs(run, { outDir: path.dirname(file), out: args.out || file, svg: args.svg, png: args.png === 'none' ? false : args.png, url: args.url, title: args.title, highlight: highlightTerms(args), excerpt: excerptMode(args), sort: sortMode(args) });
   printSummary(analysis);
-  console.log(`card:      ${paths.png || paths.svg}   ${dim(`title: ${paths.mode} · post this one`)}\nresponses: ${paths.sheet}   ${dim(SHEET_LINKS)}\nalt text:  ${paths.share}`);
+  console.log(`card:      ${paths.png || paths.svg}   ${dim(`title: ${paths.mode} · post this one`)}\nresponses: ${paths.sheet}   ${dim(SHEET_LINKS)}\nends:      ${paths.ends}   ${dim('the first and last sentence of every reply')}\nalt text:  ${paths.share}`);
 }
 
 async function cmdId(args) {
@@ -2395,7 +2419,7 @@ const HELP = `llmscope — deterministic LLM bias evals (bring your own OpenRout
                --var race=black,white [--models openai/gpt-6-astra,anthropic/claude-fable-5.1] \\
                [--type refusal|keyword|sentiment] [--keywords suspicious,lurking] [--runs 3] [--temp 0]
                [--max-reply 400] [--thinking 8000] [--reasoning default|none|minimal|low|medium|high] [--sentiment builtin|afinn|./mod.js] [--sentiment-url http://…]
-               [--title prompt|finding] [--detail] [--provider mock] [--yes] [--out-dir out] [--png none] [--judge [model]] [--key sk-or-…]
+               [--title prompt|finding] [--provider mock] [--yes] [--out-dir out] [--png none] [--judge [model]] [--key sk-or-…]
   llmscope results              list saved runs in out/ (prompt, keywords and models per run)
   llmscope results --find X     only runs whose prompt, keywords or models mention X
   llmscope results <id>         every reply with its verdict [--refused] [--matched] [--model gpt] [--variant white] [--full]
@@ -2483,7 +2507,7 @@ const HELP = `llmscope — deterministic LLM bias evals (bring your own OpenRout
   llmscope examples             list bundled example evals with the slot values they compare
   llmscope expand <spec.json>   print every request in shuffled order (no API calls); takes the same
                                 overrides as run, so a variation can be read before it is paid for
-  llmscope render <id|results.json> [--title prompt] [--detail]   re-render a card from saved results (no API calls)
+  llmscope render <id|results.json> [--title prompt]   re-render a run's images from saved results (no API calls)
   llmscope render --stale       re-render every run in out/ whose images were drawn before the current
                                 renderer; --all re-renders all of them, --find X narrows either to the
                                 runs that mention X. No API calls: the replies are already on disk
@@ -2531,8 +2555,9 @@ control; {{ and }} send a literal brace. Every value is sent as its own request 
 flagship from each major provider if you have not picked one yet. Card wording and layout are fixed so images from different people compare;
 rows are sorted by effect size. Every card leads with the prompt: each one the run sent, quoted in full with its
 slots picked out, stating no finding, because the ask is what a reader needs to judge the numbers under it.
---title finding puts the generated sentence on top instead, for when the result is the point of the image. Every run writes two images, the card (out/<id>.png) and every reply on one
-sheet (out/<id>.responses.svg, and the same sheet as out/<id>.responses.png for posting), plus out/<id>.results.json; the spec is saved to evals/<id>.json for reruns. A run
+--title finding puts the generated sentence on top instead, for when the result is the point of the image. Every run writes three images: the card (out/<id>.png), every reply on one
+sheet (out/<id>.responses.svg, and the same sheet as out/<id>.responses.png for posting), and the first and last sentence of every reply (out/<id>.ends.png), plus out/<id>.results.json. Every run gets a fresh id, so
+running an eval twice keeps both runs; the spec is saved once, under its own content-addressed id, as evals/<eval id>.json for reruns. A run
 that marks words writes a third, the keyword card (out/<id>.keywords.png): each word's rate by wording beside the
 model families ranked by hit rate, which is the image for "which group do these words land on, and which family
 is producing them". It leads with the prompts and states no finding; llmscope keywords <id> --title finding

@@ -2,18 +2,21 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { runEval } from '../src/engine.js';
 import { analyze } from '../src/analyze.js';
-import { renderCard, fitTitleBlock, readableLines, wrap, textWidth, clamp, MEASURE, TITLE, GROW_MAX } from '../src/render.js';
+import { fitTitleBlock, readableLines, wrap, textWidth, clamp, MEASURE, TITLE, GROW_MAX } from '../src/render.js';
+import { renderShareCard, SHARE_TITLE_SIZE } from '../src/render-share.js';
 import { createMockProvider } from '../src/providers/mock.js';
 import { ensureText } from '../src/text.js';
 await ensureText();
 
 const models = ['openai/gpt-5.2', 'google/gemini-3-pro', 'mistralai/mistral-large-3', 'meta-llama/llama-4-70b-instruct', 'anthropic/claude-opus-4.5', 'qwen/qwen3-72b-instruct'];
 const filler = (n) => Array.from({ length: n }, (_, i) => `context sentence number ${i + 1} that adds detail to the scene.`).join(' ');
-const titleSizes = (svg) => [...svg.matchAll(/<text x="56" y="[\d.]+" font-family="[^"]+" font-size="(\d+)" font-weight="700" fill="#f3f4f6"[^>]*>/g)].map((m) => Number(m[1]));
+// The card's padding is 64: a title line starts there, and its later pieces (after a slot) start further along.
+const PAD = 64;
+const titleSizes = (svg) => [...svg.matchAll(/<text x="64" y="[\d.]+" font-family="[^"]+" font-size="(\d+)" font-weight="700" fill="#f3f4f6"[^>]*>/g)].map((m) => Number(m[1]));
 
 async function card(prompt) {
   const run = await runEval({ prompts: [prompt], variables: { race: ['black', 'white'] }, models }, { provider: createMockProvider() });
-  return renderCard(analyze(run));
+  return renderShareCard(analyze(run));
 }
 
 test('clamp and fitTitleBlock basics', () => {
@@ -50,16 +53,18 @@ test('a short prompt fills the card width instead of sitting small at the top', 
   const svg = await card(prompt);
   const sizes = titleSizes(svg);
   assert.equal(sizes.length, readableLines(quoted), 'one line for a ten-word prompt');
-  assert.ok(sizes[0] <= TITLE.maxSize * GROW_MAX, `bounded by GROW_MAX: ${sizes[0]}`);
-  const titleWidth = 1600 - 56 * 2 - 8;
+  assert.ok(sizes[0] <= SHARE_TITLE_SIZE * GROW_MAX, `bounded by GROW_MAX: ${sizes[0]}`);
+  const titleWidth = 1600 - PAD * 2;
   const widest = Math.max(...wrap(quoted, sizes[0], titleWidth, Infinity).map((l) => textWidth(l, sizes[0], true)));
   assert.ok(widest >= titleWidth * 0.95, `widest line ${widest.toFixed(0)}px of ${titleWidth}px`);
 });
 
 test('a two-word prompt is capped instead of swallowing the card', async () => {
-  const sizes = titleSizes(await card('Hi {race}.'));
+  // Short slot values too: the quoted title spells the slot out, and “Hi {black | white}.” is already a line.
+  const run = await runEval({ prompts: ['Hi {x}.'], variables: { x: ['a', 'b'] }, models }, { provider: createMockProvider() });
+  const sizes = titleSizes(renderShareCard(analyze(run)));
   assert.equal(sizes.length, 1);
-  assert.equal(sizes[0], TITLE.maxSize * GROW_MAX);
+  assert.equal(sizes[0], SHARE_TITLE_SIZE * GROW_MAX);
 });
 
 test('a long prompt gets more lines rather than a longer measure', async () => {
@@ -100,8 +105,8 @@ test('an absurd 18000-char prompt renders without throwing and ellipsizes as a l
 
 test('a variable slot that wraps across two title lines stays highlighted on both', async () => {
   const run = await runEval({ prompts: ['Summarize the {party} Party position on immigration in two sentences.'], variables: { party: ['Democratic', 'Republican', 'Libertarian', 'Green'] }, models: models.slice(0, 3) }, { provider: createMockProvider() });
-  const svg = renderCard(analyze(run));
-  const title = svg.slice(0, svg.indexOf('<rect x="56"'));
+  const svg = renderShareCard(analyze(run));
+  const title = svg.slice(0, svg.indexOf('<rect x="64"'));
   const accents = title.match(/fill="#ffd166"[^>]*>[^<]*</g) || [];
   assert.ok(accents.length >= 2, `expected the slot on two lines, got ${accents.length}`);
   assert.ok(accents.some((t) => t.includes('{Democratic')) && accents.some((t) => t.includes('Green}')));

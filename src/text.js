@@ -5,6 +5,11 @@ import { prepareWithSegments, layoutWithLines } from '@chenglou/pretext';
 
 export const FONT_SANS = 'DejaVu Sans';
 export const FONT_MONO = 'DejaVu Sans Mono';
+
+// The font-family stacks the SVGs carry, built from the faces above so no renderer can name a face it does not
+// measure with. Every card and sheet reads from these two rather than spelling the stack out again.
+export const SANS = `'${FONT_SANS}', 'Helvetica Neue', Helvetica, Arial, sans-serif`;
+export const MONO = `'${FONT_MONO}', Menlo, Consolas, monospace`;
 export const FONT_FILES = [
   { pkg: 'dejavu-fonts-ttf/ttf/DejaVuSans.ttf', family: FONT_SANS, weight: 400 },
   { pkg: 'dejavu-fonts-ttf/ttf/DejaVuSans-Bold.ttf', family: FONT_SANS, weight: 700 },

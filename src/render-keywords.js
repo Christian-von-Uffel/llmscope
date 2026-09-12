@@ -16,10 +16,8 @@ import { prettyName, monthStamp, quoted } from './render-share.js';
 import { keywordGrid } from './keyword-grid.js';
 import { modelFamily } from './models.js';
 import { logoFor } from './logos.js';
-import { pinTextWidths } from './text.js';
+import { pinTextWidths, SANS, MONO } from './text.js';
 
-const SANS = "'DejaVu Sans', 'Helvetica Neue', Helvetica, Arial, sans-serif";
-const MONO = "'DejaVu Sans Mono', Menlo, Consolas, monospace";
 const pct = (x) => `${Math.round(x * 100)}%`;
 /** Gaps are spelled out. "pp" saves four characters and costs the reader the sentence. */
 const points = (x) => `${Math.round(x * 100)} point${Math.round(x * 100) === 1 ? '' : 's'}`;
@@ -127,6 +125,40 @@ export function keywordFinding(grid, names = {}) {
 
 /** How tall a word's row may get before the heading has to give way. Below this the bars stop being readable. */
 export const MIN_ROW_H = 56;
+/** A row label's leading, when it takes two lines. */
+const LABEL_LEADING = 1.15;
+
+/** `text` cut to `width` at `size`, bold, ending in an ellipsis when it had to be. */
+function clipLine(text, size, width) {
+  if (textWidth(text, size, true) <= width) return text;
+  let kept = text;
+  while (kept.length > 1 && textWidth(kept + '…', size, true) > width) kept = kept.slice(0, -1).trimEnd();
+  return kept + '…';
+}
+
+/**
+ * A marked word as its row's name. On one line at the row's own size, or a little under it; failing that on two
+ * lines when the row is tall enough for them, at the largest size that keeps both inside the column; failing
+ * that on one line at whatever size fits; and only past all of that cut with an ellipsis. Every line is measured
+ * against the column, never trusted to it: the bars are drawn after the label and over anything that ran on —
+ * which is how a long phrase used to come out as its first few words with a bar across the rest.
+ */
+export function labelLines(label, width, rowH, { captioned = false } = {}) {
+  const top = clamp(19, rowH * 0.36, 34);
+  const room = rowH - (captioned ? 34 : 12);
+  const fits = (lines, s) => lines.every((l) => textWidth(l, s, true) <= width);
+  const one = fit(label, top, width, true, Math.max(14, Math.round(top * 0.7)));
+  if (fits([label], one)) return { size: one, lines: [label] };
+  for (let s = top; s >= 14; s -= 1) {
+    if (2 * s * LABEL_LEADING > room) break;
+    const lines = wrap(label, s, width, Infinity, true);
+    if (lines.length <= 2 && fits(lines, s)) return { size: s, lines };
+  }
+  const small = fit(label, top, width, true, 14);
+  if (fits([label], small)) return { size: small, lines: [label] };
+  const n = Math.max(1, Math.min(2, Math.floor(room / (14 * LABEL_LEADING))));
+  return { size: 14, lines: wrap(label, 14, width, n, true).map((l) => clipLine(l, 14, width)) };
+}
 
 /**
  * @param {object} run the saved run, for the replies themselves
@@ -162,7 +194,40 @@ export function renderKeywordCard(run, a, terms, { width = 1600, height = 1600, 
   text(W - pad, y, stamp, { size: 26, fill: a.mock ? COLORS.accent : COLORS.muted, font: MONO, anchor: 'end', extra: 'letter-spacing="2"' });
 
   const footerH = 100; // one line of metadata and the share link; the legend that used to sit above them is gone
-  const headerH = 120; // logos, names and group headings; the caption that used to sit above them is gone
+
+  // ---- geometry: two blocks of columns, sharing the rows ----
+  // Widths depend on the card and the words alone, so they are settled here, before the heading takes its height:
+  // the family columns decide how large their logos and numbers are, and that decides how tall the header is.
+  const gutter = 22;
+  const G = Math.max(1, grid.variants.length);
+  const F = Math.max(1, grid.families.length);
+  // The words are the rows' names and are read first, so they are given their width first: what the longest
+  // needs on one line at a row's reading size, out of what is left once the two blocks have their targets. A
+  // card with one wording used to hand all of that spare width to its one bar, which then ran over the words.
+  const want = G * 112 + F * 88;
+  const labelBase = clamp(200, Math.round(maxW * 0.16), 260);
+  const labelNeed = Math.max(0, ...lines.map((r) => textWidth(r.label, 28, true))) + 46;
+  const spare = Math.max(0, maxW - gutter - labelBase - want);
+  const labelW = Math.round(clamp(labelBase, labelNeed, labelBase + spare * 0.6));
+  // The per-family cells are what the card is read for, so they take the width the words leave. A wording bar is
+  // read as a length and needs only enough for its number, so it is held at one narrow target rather than fed
+  // whatever is spare; the families grow with the rest, up to a column wide enough for a large logo and number.
+  const room = maxW - labelW - gutter;
+  const GROUP_W = 100;
+  const FAM_MIN = 88;
+  const FAM_MAX = 168;
+  const shrink = Math.min(1, room / (G * GROUP_W + F * FAM_MIN));
+  const groupW = GROUP_W * shrink;
+  const famW = Math.min(FAM_MAX, (room - groupW * G) / F);
+  const varX = pad + labelW;
+  // Whatever neither block takes widens the gap between them: the families stay on the right edge of the card.
+  const famX = pad + maxW - famW * F;
+  // Logo, family name and hit rate, all sized to the column so a card with fewer families is read from further away.
+  const famLogo = Math.round(clamp(26, famW * 0.34, 52));
+  const famName = clamp(20, famW * 0.19, 26);
+  const famPct = clamp(25, famW * 0.28, 40);
+  // The header is what those three stack to, over the rows, never less than the height the small card had.
+  const headerH = Math.max(120, Math.round(38 + famPct * 1.15 + famName * 0.95 + famLogo + 12));
   const gridBottom = H - footerH;
   const rowGap = 10;
   // The grid is the card, so the heading may only use the height the words do not need.
@@ -203,20 +268,8 @@ export function renderKeywordCard(run, a, terms, { width = 1600, height = 1600, 
     y += 42;
   }
 
-  // ---- geometry: two blocks of columns, sharing the rows ----
-  const gutter = 22;
+  // ---- rows: the height the heading left ----
   const gridTop = y;
-  const labelW = clamp(200, Math.round(maxW * 0.16), 260);
-  const G = Math.max(1, grid.variants.length);
-  const F = Math.max(1, grid.families.length);
-  // Group cells are the primary comparison and get the wider target; when there is room to spare it goes to them.
-  const room = maxW - labelW - gutter;
-  const want = G * 112 + F * 88;
-  const shrink = Math.min(1, room / want);
-  const famW = (F * 88 * shrink) / F;
-  const groupW = (room - famW * F) / G;
-  const varX = pad + labelW;
-  const famX = varX + groupW * G + gutter;
   const available = gridBottom - gridTop - headerH - rowGap * (lines.length - 1);
   const rowH = clamp(MIN_ROW_H, available / Math.max(1, lines.length), 150);
   const slack = Math.max(0, available - rowH * lines.length);
@@ -226,21 +279,24 @@ export function renderKeywordCard(run, a, terms, { width = 1600, height = 1600, 
   const famCeil = ceilingFor(Math.max(0, ...lines.flatMap((r) => r.byFamily.filter((f) => f.n).map((f) => f.rate))));
 
   // ---- column headings ----
-  const headBase = blockTop + headerH - 16;
+  // Stacked up from the first row: the hit rate nearest the cells it sums, the name over it, the logo on top.
+  const rowsTop = blockTop + headerH;
+  const pctBase = rowsTop - 38;
+  const nameBase = pctBase - famPct * 1.15;
+  const logoTop = nameBase - famName * 0.95 - famLogo;
   // Headings must clear their neighbours, so they are measured against the column, not the column plus its gutter.
   const headSize = Math.min(...grid.variants.map((v) => fit(v, 32, groupW - 10, true, 13)));
-  if (!single) grid.variants.forEach((v, i) => text(varX + i * groupW + groupW / 2, headBase - 52, v, { size: headSize, weight: 700, fill: COLORS.accent, anchor: 'middle' }));
+  if (!single) grid.variants.forEach((v, i) => text(varX + i * groupW + groupW / 2, nameBase, v, { size: headSize, weight: 700, fill: COLORS.accent, anchor: 'middle' }));
 
   // Each family heads its own column with its logo, its name, its hit rate over every word, and its own gap.
   const famLabel = (f) => `${familyName(f.family)}${f.models.length > 1 ? ` ×${f.models.length}` : ''}`;
-  const famSize = Math.min(...grid.families.map((f) => fit(famLabel(f), 22, famW - 8, true, 12)));
+  const famSize = Math.min(...grid.families.map((f) => fit(famLabel(f), famName, famW - 8, true, 12)));
   grid.families.forEach((f, i) => {
     const cx = famX + i * famW + famW / 2;
     const logo = logoFor(f.models[0]);
-    const ls = Math.min(famW - 16, 26);
-    if (logo) parts.push(`<image x="${(cx - ls / 2).toFixed(1)}" y="${(headBase - 94).toFixed(1)}" width="${ls}" height="${ls}" href="${logo}" opacity="0.9"/>`);
-    text(cx, headBase - 52, famLabel(f), { size: famSize, weight: 700, anchor: 'middle' });
-    text(cx, headBase - 22, pct(f.rate), { size: 25, weight: 700, fill: COLORS.accent, anchor: 'middle' });
+    if (logo) parts.push(`<image x="${(cx - famLogo / 2).toFixed(1)}" y="${logoTop.toFixed(1)}" width="${famLogo}" height="${famLogo}" href="${logo}" opacity="0.9"/>`);
+    text(cx, nameBase, famLabel(f), { size: famSize, weight: 700, anchor: 'middle' });
+    text(cx, pctBase, pct(f.rate), { size: fit(pct(f.rate), famPct, famW - 8, true, 14), weight: 700, fill: COLORS.accent, anchor: 'middle' });
   });
   // ---- rows ----
   lines.forEach((row, ri) => {
@@ -252,8 +308,11 @@ export function renderKeywordCard(run, a, terms, { width = 1600, height = 1600, 
     const caption = row.delta && !single
       ? `most in ${row.tops.slice(0, 2).join(' and ')}${row.tops.length > 2 ? ` +${row.tops.length - 2}` : ''}`
       : null;
-    const ls = fit(row.label, clamp(19, rowH * 0.36, 34), labelW - 46, true, 14);
-    text(pad + 22, mid + (caption ? -4 : ls / 3), row.label, { size: ls, weight: 700 });
+    const label = labelLines(row.label, labelW - 46, rowH, { captioned: Boolean(caption) });
+    const lh = label.size * LABEL_LEADING;
+    // One line sits on the row's centre, or just above its caption; a second stacks up from that baseline.
+    const lastBase = caption ? mid - 4 : mid + label.size / 3 + ((label.lines.length - 1) * lh) / 2;
+    label.lines.forEach((l, i) => text(pad + 22, lastBase - (label.lines.length - 1 - i) * lh, l, { size: label.size, weight: 700 }));
     if (caption) text(pad + 22, mid + 24, caption, { size: fit(caption, 18, labelW - 40, false, 12), fill: COLORS.muted });
 
     // left block: one bar per group, all against one ceiling, each carrying its number
@@ -276,7 +335,18 @@ export function renderKeywordCard(run, a, terms, { width = 1600, height = 1600, 
       if (!drawn) text(cx + 12, mid + size / 3, label, { size, weight: 700, fill: COLORS.muted });
       else if (len - CAP_W - 16 >= tw) text(cx + len - CAP_W - 9, mid + size / 3, label, { size, weight: 700, fill: '#fff', anchor: 'end' });
       else if (len + 10 + tw <= inner) text(cx + len + 10, mid + size / 3, label, { size, weight: 700 });
-      else text(cx + len - CAP_W - 9, mid + size / 3, label, { size, weight: 700, fill: '#fff', anchor: 'end' });
+      else {
+        // A mid-length bar in a narrow column: the number fits neither inside it nor beside it at the row's size.
+        // Beside at a smaller size when that fits; failing that, centred on the cell over bar and track alike,
+        // with a halo of the background so the cap and the bar's edge never cut through it. Never anchored to the
+        // bar's end and left to spill: that put one cell's number on top of its neighbour's.
+        const beside = fit(label, size, inner - len - 10, true, 13);
+        if (len + 10 + textWidth(label, beside, true) <= inner) text(cx + len + 10, mid + beside / 3, label, { size: beside, weight: 700 });
+        else {
+          const centred = fit(label, size, inner - 8, true, 13);
+          text(cx + inner / 2, mid + centred / 3, label, { size: centred, weight: 700, fill: '#fff', anchor: 'middle', extra: `paint-order="stroke" stroke="${COLORS.bg}" stroke-width="4" stroke-linejoin="round"` });
+        }
+      }
     });
 
     // right block: the same measure per family, as a number over a rule. Nothing rings the largest cell of a row:
@@ -286,11 +356,13 @@ export function renderKeywordCard(run, a, terms, { width = 1600, height = 1600, 
       const cx = famX + ci * famW;
       const inner = famW - 10;
       const label = f.n ? pct(f.rate) : '—';
-      const size = fit(label, clamp(18, barH * 0.46, 28), inner - 8, true, 12);
+      // As large as the column allows and the row can hold: these numbers are the reading the card exists for.
+      const size = fit(label, clamp(18, Math.min(famW * 0.28, rowH * 0.42), 40), inner - 8, true, 12);
+      const ruleH = clamp(7, famW * 0.07, 11);
       text(cx + inner / 2, mid + size / 3 - 6, label, { size, weight: 700, fill: f.rate > 0 ? COLORS.text : COLORS.muted, anchor: 'middle' });
-      const ruleY = mid + barH / 2 - 9;
-      rect(cx + 4, ruleY, inner - 8, 7, COLORS.gray, { rx: 3, opacity: 0.5 });
-      if (f.n && f.rate > 0) rect(cx + 4, ruleY, Math.max(5, (inner - 8) * Math.min(1, f.rate / famCeil)), 7, COLORS.red, { rx: 3 });
+      const ruleY = mid + barH / 2 - ruleH - 2;
+      rect(cx + 4, ruleY, inner - 8, ruleH, COLORS.gray, { rx: 3, opacity: 0.5 });
+      if (f.n && f.rate > 0) rect(cx + 4, ruleY, Math.max(5, (inner - 8) * Math.min(1, f.rate / famCeil)), ruleH, COLORS.red, { rx: 3 });
     });
 
   });

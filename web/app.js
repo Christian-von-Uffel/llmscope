@@ -4,16 +4,16 @@
 // than three, so the app is already parsed and its model list already loading while someone is still reading the
 // hero. A returning reader with a saved key never sees the first two at all.
 import { planRun, runEval, rescoreRun } from '../src/engine.js';
-import { analyze, totalTokens, outcomeOf } from '../src/analyze.js';
+import { analyze, totalTokens, outcomeOf, replyBody } from '../src/analyze.js';
 import { renderShareCard } from '../src/render-share.js';
 import { renderResponseSheet, EXCERPTS } from '../src/sheet.js';
-import { RESPONSE_FILTERS, filterResponses, parseSearch, replyBody, shownText, markSpans, toCsv, toJson } from '../src/responses.js';
+import { RESPONSE_FILTERS, filterResponses, parseSearch, shownText, markSpans, toCsv, toJson } from '../src/responses.js';
 import { renderKeywordCard } from '../src/render-keywords.js';
 import { isValidKeyword, splitTerms, mergeTerms, countKeywords, cleanTerms, batchKey } from '../src/checks/keywords.js';
 import { logoBody, providerOf } from '../src/logos.js';
 import { ensureText, FONT_FILES } from '../src/text.js';
 import { usedVariables, liftInlineVariants, strayBraces, defaultCardTitle, normalizeSpec, CANONICAL_FIELDS } from '../src/spec.js';
-import { isValidId } from '../src/id.js';
+import { isValidId, freshId } from '../src/id.js';
 import { createOpenRouterProvider, checkKey, maskKey } from '../src/providers/openrouter.js';
 import { createMockProvider } from '../src/providers/mock.js';
 import { fetchModels, pickFrontier, newestPerProvider, estimateCost, formatUsd, priceLabel, FRONTIER_DEFAULTS, MAIN_PROVIDERS, resolveModels, isRunnableModel, cleanModels, formatModels, modelKey } from '../src/models.js';
@@ -102,10 +102,13 @@ async function resolveEvalRef(ref) {
   if (ref.kind === 'spec') {
     const spec = normalizeSpec(ref.spec);
     const { id } = await planRun(spec);
+    const own = await store.latestRunFor(id);
+    if (own) return { id: own.id, spec: normalizeSpec(own.spec), run: own };
     return (await lookupPublished(id)) || { id, spec };
   }
-  const run = await store.loadRun(ref.id);
-  if (run) return { id: ref.id, spec: normalizeSpec(run.spec), run };
+  // A run's own id first, then an eval's — the newest run this browser has of it — then what the site publishes.
+  const run = (await store.loadRun(ref.id)) || (await store.latestRunFor(ref.id));
+  if (run) return { id: run.id, spec: normalizeSpec(run.spec), run };
   return (await lookupPublished(ref.id))
     || { error: `Nothing here answers to ${ref.id}. This browser can open its own runs and the evals published on this site; an ID from somebody else's post needs the full share link for now.` };
 }
@@ -480,11 +483,11 @@ function syncOrigin(plan) {
   if (!openedFrom) return;
   const changes = describeChanges(openedFrom.spec, plan.spec);
   const head = changes.length
-    ? `<div class="origin-head"><div>Modified from <code>${esc(openedFrom.id)}</code></div><div class="hint">new ID <code class="now">${esc(plan.id)}</code></div></div>`
+    ? `<div class="origin-head"><div>Modified from <code>${esc(openedFrom.id)}</code></div><div class="hint">now eval <code class="now">${esc(plan.id)}</code></div></div>`
     : `<div class="origin-head"><div>Opened <code>${esc(openedFrom.id)}</code></div><div class="hint">unchanged</div></div>`;
   const note = changes.length
     ? `Changed: ${esc(changes.join(', '))}. Everything else is as it was published.`
-    : 'Change the prompt, the models or the keywords and this becomes a run of your own, with its own ID.';
+    : 'Change the prompt, the models or the keywords and this becomes an eval of your own. Every run gets its own ID either way.';
   box.innerHTML = `${head}<div class="hint">${note}</div>`
     + (changes.length ? `<div class="origin-actions"><button id="btn-reset-origin" class="btn ghost small">Reset to ${esc(openedFrom.id)}</button></div>` : '');
   const reset = $('btn-reset-origin');
@@ -895,14 +898,18 @@ async function start(kind) {
   abort = new AbortController();
   $('btn-run').disabled = $('btn-mock').disabled = true;
   $('btn-stop').hidden = false;
-  const partial = { version: 'llmscope/0.1', id: plan.id, spec: plan.spec, provider: provider.name, results: [] };
+  // The run's own id, minted here so the partial painted mid-run and the finished run are one run to the page —
+  // the words typed into the marking box while it streams survive the last repaint. It is not the eval's id:
+  // running the same eval again is a new generation, saved beside the last one rather than over it.
+  const id = await freshId(plan.id);
+  const partial = { version: 'llmscope/0.1', id, spec_id: plan.id, spec: plan.spec, provider: provider.name, results: [] };
   paintedId = null; // a new run brings its own marked words
   $('bar').style.width = '0%';
   $('progress-text').textContent = 'starting…';
   let last = 0;
   try {
     currentRun = await runEval(spec, {
-      provider, concurrency: 4, signal: abort.signal,
+      provider, id, concurrency: 4, signal: abort.signal,
       onProgress: ({ done, total, result }) => {
         partial.results.push(result);
         $('bar').style.width = `${(done / total) * 100}%`;
@@ -1089,8 +1096,8 @@ const ready = (async () => {
   syncRenderButton();
   const plan = await refresh();
   if (!shared) {
-    const last = await store.loadRun(plan.id);
-    if (last) await openRun(last, `restored the last run for ${plan.id}`);
+    const last = await store.latestRunFor(plan.id);
+    if (last) await openRun(last, `restored ${last.id}, the last run of this eval`);
   }
   await loadModels();
   // Last, so the cost on it is the real one rather than a dash the reader has to watch change.

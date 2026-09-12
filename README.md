@@ -210,18 +210,25 @@ Both choices are offered wherever a run starts, so neither is a flag you have to
   reads the result before offering: the family of whichever model refused most and of whichever refused least
   come first, with their rates. The second opens the wording you just ran, ready to tweak a word.
 
-Neither touches the file it came from. The run gets its own ID, its own card, and its own `evals/<id>.json`, so
+Neither touches the file it came from. The run gets its own ID, its own card, and its own `evals/<eval id>.json`, so
 the follow-up is as rerunnable as the original — and the two cards, built to the same fixed layout, sit side by
 side.
 
-**Where things go.** Every run writes three files and saves the recipe:
+**Two kinds of ID.** A run's ID is minted when it starts and is never reused: the same eval run twice is two
+generations of replies, so it is two runs, side by side in `out/`, each with its own card and share link. The
+eval's ID is content-addressed — the same prompt, slots, models and settings always give the same one — and names
+the spec's file in `evals/`, so the recipe is saved once however often it is run. `llmscope results <eval id>`
+opens the newest run of that eval; the listing shows which eval each run came from.
+
+**Where things go.** Every run writes its results and three images, and saves the recipe:
 
 | file | what |
 |---|---|
-| `evals/<id>.json` | the spec: prompt, slot values, models, settings. Rerun with `llmscope run evals/<id>.json`. |
+| `evals/<eval id>.json` | the spec: prompt, slot values, models, settings. Rerun with `llmscope run evals/<eval id>.json`. |
 | `out/<id>.results.json` | every response: model, filled-in prompt, slot value, run, full text, tokens (prompt, reply, and total), and each verdict (refused and why, keyword hits, sentiment). |
 | `out/<id>.png`, `out/<id>.svg` | the card. `llmscope render out/<id>.results.json` rebuilds it without new API calls, and `llmscope render --stale` rebuilds every run in `out/` whose images were drawn before the current renderer. |
-| `out/<id>.responses.svg`, `.png` | every reply on one 4096 px image, in a batch per group. The card plus this sheet show a viewer everything. The SVG is the one that opens: it is clickable (see below) and it stays sharp however far in you zoom; the PNG is for posting. |
+| `out/<id>.responses.svg`, `.png` | every reply on one 4096 px image, one reply per line under a heading per group, each opening with its model's mark and name. The card plus this sheet show a viewer everything. The SVG is the one that opens: it is clickable (see below) and it stays sharp however far in you zoom; the PNG is for posting. |
+| `out/<id>.ends.svg`, `.png` | the first and last sentence of every reply on one image, set out the same way: how each model opens and where it lands, side by side. `llmscope sheet <id> --excerpt ends` re-makes it. |
 | `out/<id>.keywords.png`, `.svg` | the keyword card, written by any run that marks words: each word's rate by group, beside the model families ranked by how often it was found in their outputs. `llmscope keywords <id>` re-makes it. |
 | `out/<id>.sentences.png`, `.svg` | the sentences image, written only when you ask for it with `llmscope sentences <id>`: how many times the marked words matched, counted under the variable the eval swapped and split by model, each match shown in the sentence it turned up in. |
 
@@ -298,7 +305,7 @@ size its widest line reaches the right edge: one step larger and a word would sp
 long to fit the title area shrinks below its measure instead, taking the lines it needs, and is still shown in
 full; a two-word prompt stops at twice the design size rather than swallowing the card. The results come first: the
 heading may only use the height the grid does not need, so rows never fall below 64 px however long the prompt is.
-The card, the detail card and the responses sheet header all size it this way.
+The card and the responses sheet header both size it this way.
 
 Past roughly 150 words the title area runs out of height before the measure runs out of words, so the lines get
 longer instead of more numerous (a 400-word prompt lands at about 17 words a line); past ~2,000 words the last line
@@ -414,7 +421,8 @@ than drawing a page of ellipses.
 
 The same three modes work on the terminal printout and on the browser's response table: `llmscope results <id>
 --excerpt ends` prints each reply's first and last sentence, which is how to read where twenty models each landed
-without scrolling through all of them, and the menu after a run offers it as *Print just the ends of each reply*.
+without scrolling through all of them, and the menu after a run offers the same as an image, *Open the first and
+last sentences card*.
 On the printout the excerpt replaces the 320-character cut rather than stacking with it, since re-cutting would
 drop the last sentence the mode exists to show, so `--full` is only about the default mode.
 

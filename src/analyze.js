@@ -6,6 +6,9 @@ export function totalTokens(r) {
   return r.total_tokens ?? (r.prompt_tokens || 0) + (r.tokens || 0);
 }
 
+/** What one reply says, error included: the text every check, count and image is run against. */
+export const replyBody = (r) => (r.error ? `ERROR: ${r.error}` : r.text || '');
+
 /**
  * The outcome one reply landed on, in the four words everything downstream is built from: the sheet's badge, the
  * CLI's verdict, the CSV column and the page's tag. The precedence is the whole content of the function — an

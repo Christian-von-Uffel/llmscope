@@ -207,7 +207,8 @@ test('the card draws every word, both matrices, the model logos and the scales i
   assert.equal((svg.match(/<image /g) || []).length, grid.families.length, 'one logo per family');
   // The largest cell of a row is not ringed: both blocks descend from the left, so ordering already puts it where
   // the eye lands first, and a ring on top of that is one mark asking to be decoded for nothing.
-  assert.ok(!/stroke-width=/.test(svg), 'no cell is ringed');
+  // (A stroke on a <text> is the halo a number wears where it sits over a bar's edge, not a ring.)
+  assert.ok(!/<rect[^>]*stroke-width=/.test(svg), 'no cell is ringed');
   assert.ok(grid.rows.some((r) => r.sources.length), 'though the grid still knows which family each word came from');
   assert.ok(svg.includes('MOCK DATA'), 'fake replies are marked as fake');
   // Every rate on the card is a number as well as a bar: the image never asks anyone to measure a length.

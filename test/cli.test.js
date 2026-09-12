@@ -25,11 +25,36 @@ test('one-line run with flags, mock provider, no TTY: writes results, svg, png a
   const sheet = await fs.readFile(path.join(tmp, 'out', `${id}.responses.svg`), 'utf8');
   assert.ok(sheet.includes('llmscope · refusal rate · responses') && sheet.includes('8 replies'), 'every run also writes the responses sheet');
   assert.match(stdout, /responses: .*\.responses\.svg/);
-  const saved = JSON.parse(await fs.readFile(path.join(tmp, 'evals', `${id}.json`), 'utf8'));
+  const ends = await fs.readFile(path.join(tmp, 'out', `${id}.ends.svg`), 'utf8');
+  assert.ok(ends.includes('showing the first and last sentence of each reply'), 'and the first and last sentences of every reply, on an image of its own');
+  assert.match(stdout, /ends: .*\.ends\.svg/);
+  // The spec is filed under the eval's own id, which is not the run's: a run is one generation of replies.
+  const evalId = /spec saved to evals\/([0-9A-Za-z]{6})\.json/.exec(stdout)?.[1];
+  assert.ok(evalId && evalId !== id, 'the eval is saved under its own content-addressed id:\n' + stdout);
+  assert.equal(results.spec_id, evalId, 'the run records which eval it is a generation of');
+  const saved = JSON.parse(await fs.readFile(path.join(tmp, 'evals', `${evalId}.json`), 'utf8'));
   assert.deepEqual(saved.variables, { race: ['black', 'white'] });
-  // rerunning the saved file yields the same id
-  const again = await cli('id', path.join(tmp, 'evals', `${id}.json`));
-  assert.equal(again.stdout.trim(), id);
+  // planning the saved file yields the same eval id
+  const again = await cli('id', path.join(tmp, 'evals', `${evalId}.json`));
+  assert.equal(again.stdout.trim(), evalId);
+});
+
+test('the same eval run twice is two runs: two ids, two results files, and the eval id opens the newest', async () => {
+  const flags = ['run', '--prompt', 'A {race} man asks for directions. What happens?', '--var', 'race=black,white', '--models', 'openai/gpt-6-astra', '--runs', '1', '--provider', 'mock', '--yes', '--png', 'none'];
+  const first = await cli(...flags);
+  const second = await cli(...flags);
+  const runId = (out) => /\bid ([0-9A-Za-z]{6})\b/.exec(out)[1];
+  const evalId = (out) => /evals\/([0-9A-Za-z]{6})\.json/.exec(out)[1];
+  assert.notEqual(runId(first.stdout), runId(second.stdout), 'a second generation is a second run, not the first written over');
+  assert.equal(evalId(first.stdout), evalId(second.stdout), 'both are runs of the one eval');
+  assert.match(second.stdout, new RegExp(`spec saved to evals/${evalId(first.stdout)}\\.json`), 'the second run files its spec under the same eval id, so evals/ holds it once');
+  for (const out of [first.stdout, second.stdout]) await fs.access(path.join(tmp, 'out', `${runId(out)}.results.json`));
+  const list = await cli('results');
+  assert.ok(list.stdout.includes(runId(first.stdout)) && list.stdout.includes(runId(second.stdout)), 'both runs are listed:\n' + list.stdout);
+  assert.match(list.stdout, new RegExp(`eval ${evalId(first.stdout)}`), 'each run says which eval it came from');
+  const byEval = await cli('results', evalId(first.stdout));
+  assert.match(byEval.stderr, new RegExp(`is an eval; showing its newest run, ${runId(second.stdout)}`));
+  assert.match(byEval.stdout, /of 2 responses/);
 });
 
 test('keyword flags flow into the card with the standard wording', async () => {
@@ -68,8 +93,8 @@ test('--var swaps an example\'s groups without touching the file', async () => {
   const { stdout } = await cli('run', src, '--var', 'party=CDU,SPD,AfD', '--models', 'openai/gpt-6-astra', '--runs', '1', '--provider', 'mock', '--yes', '--png', 'none');
   assert.match(stdout, /\{party\}\s+CDU, SPD, AfD/, 'the review shows the new groups');
   assert.equal(await fs.readFile(src, 'utf8'), before, 'the example file is left alone');
-  const id = /\bid ([0-9A-Za-z]{6})\b/.exec(stdout)[1];
-  const saved = JSON.parse(await fs.readFile(path.join(tmp, 'evals', `${id}.json`), 'utf8'));
+  const evalId = /evals\/([0-9A-Za-z]{6})\.json/.exec(stdout)[1];
+  const saved = JSON.parse(await fs.readFile(path.join(tmp, 'evals', `${evalId}.json`), 'utf8'));
   assert.deepEqual(saved.variables, { party: ['CDU', 'SPD', 'AfD'] }, 'the run it actually ran is saved as its own eval');
 });
 
@@ -381,20 +406,19 @@ test('--text and --edit: the plain blob, the annotated file, and $EDITOR', async
 
 });
 
-test('--title prompt is remembered in the saved spec and rendered; --detail writes the detail card', async () => {
+test('--title prompt is remembered in the saved spec and rendered, and render re-makes the images', async () => {
   const { stdout } = await cli('run', '--prompt', 'A {race} man walks by. How does she feel?', '--var', 'race=black,white', '--models', 'openai/gpt-6-astra,google/gemini-3.8-flash', '--runs', '2', '--title', 'prompt', '--provider', 'mock', '--yes', '--png', 'none');
   const id = /id ([0-9A-Za-z]{6})/.exec(stdout)[1];
+  const evalId = /spec saved to evals\/([0-9A-Za-z]{6})\.json/.exec(stdout)[1];
   assert.match(stdout, /title: prompt/);
-  const saved = JSON.parse(await fs.readFile(path.join(tmp, 'evals', `${id}.json`), 'utf8'));
+  const saved = JSON.parse(await fs.readFile(path.join(tmp, 'evals', `${evalId}.json`), 'utf8'));
   assert.equal(saved.card_title, 'prompt');
   const svg = await fs.readFile(path.join(tmp, 'out', `${id}.svg`), 'utf8');
   // The prompt-title card leads with the question and says what was counted under it; no finding is stated.
   assert.ok(svg.includes('responses that refused the prompt') && !svg.includes('models refuse'));
   const re = await cli('render', id, '--title', 'finding', '--png', 'none');
   assert.match(re.stdout, /title: finding/);
-  const detail = await cli('render', id, '--detail', '--png', 'none');
-  assert.match(detail.stdout, /title: detail/);
-  assert.ok((await fs.readFile(path.join(tmp, 'out', `${id}.detail.svg`), 'utf8')).includes('tile = share of runs'));
+  assert.match(re.stdout, /ends: .*\.ends\.svg/, 'the ends image is re-made with the rest');
   await assert.rejects(cli('run', '--prompt', 'x {a}', '--var', 'a=1,2', '--models', 'm/one', '--title', 'banana', '--provider', 'mock', '--yes', '--png', 'none'), (err) => /--title must be/.test(err.stderr));
 });
 
@@ -408,9 +432,9 @@ test('any eval file runs on any models: --models replaces, --add-models extends,
   assert.match(stdout, /requests\s+8\b/, '--runs overrides the file too');
   assert.deepEqual(JSON.parse(await fs.readFile(file, 'utf8')), original, 'the eval file itself is never rewritten');
   // the run it actually did is saved as its own eval, and the rerun line points at that
-  const id = /\bid ([0-9A-Za-z]{6})\b/.exec(stdout)[1];
-  assert.match(stdout, new RegExp(`rerun: llmscope run evals/${id}\\.json`));
-  const derived = JSON.parse(await fs.readFile(path.join(tmp, 'evals', `${id}.json`), 'utf8'));
+  const evalId = /spec saved to evals\/([0-9A-Za-z]{6})\.json/.exec(stdout)[1];
+  assert.match(stdout, new RegExp(`rerun: llmscope run evals/${evalId}\\.json`));
+  const derived = JSON.parse(await fs.readFile(path.join(tmp, 'evals', `${evalId}.json`), 'utf8'));
   assert.deepEqual(derived.models, ['acme/one', 'acme/three']);
   assert.equal(derived.runs, 2);
 });

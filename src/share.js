@@ -93,7 +93,7 @@ export function altText(a, { names = {}, long = false } = {}) {
 }
 
 /** The post body: the finding, then enough method for a reader to judge it, then the link to rerun it. */
-export function caption(a, { names = {}, url = null } = {}) {
+function caption(a, { names = {}, url = null } = {}) {
   const shareUrl = url || `${a.spec.share_base || ''}${a.id}`;
   const method = [
     setupLine(a).toLowerCase(),

@@ -10,7 +10,7 @@
 // Reading a run inside llmscope is only ever the first half of the work, so the same selection leaves as data:
 // JSON for a script (jq, pandas, a notebook) and CSV for a spreadsheet. Both carry every reply in full — an
 // excerpt is a reading aid, and a truncated reply in an export would quietly poison whatever is counted from it.
-import { totalTokens, outcomeOf } from './analyze.js';
+import { totalTokens, outcomeOf, replyBody } from './analyze.js';
 import { excerpt, SELECTIONS } from './sheet.js';
 import { findKeywordSpans, splitTerms, isValidKeyword } from './checks/keywords.js';
 
@@ -54,8 +54,6 @@ export function filterResponses(run, { select = 'all', model = null, variant = n
 }
 
 /** What a reply amounts to in an export: what the model said, or the error that came back in place of it. */
-export const replyBody = (r) => (r.error ? `ERROR: ${r.error}` : r.text || '');
-
 /**
  * What a view shows for one reply under `mode`: the same rule the responses image draws by, so the table and the
  * sheet quote the same sentences. An error is not the model's wording, so it is never cut into sentences. The

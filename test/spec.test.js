@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { normalizeSpec, variantCombos, fillTemplate, buildJobs, specId, canonicalSpec, validateSpec, displayTemplate, usedVariables, strayBraces, isSlotToken } from '../src/spec.js';
-import { isValidId } from '../src/id.js';
+import { isValidId, freshId } from '../src/id.js';
 import { seededShuffle } from '../src/rng.js';
 
 const base = { prompts: ['A {black|white} man walks by. How does she feel?'], models: ['b/two', 'a/one'], runs: 2 };
@@ -70,6 +70,12 @@ test('id is 6 base62 chars, stable across key order and model order, and changes
   assert.notEqual(a, c);
   // presentation fields do not change the id
   assert.equal(await specId({ ...base, title: 'X', labels: { pass: 'y' }, share_base: 'z/' }), a);
+});
+
+test('a fresh id is valid and never repeats, however often one eval is run', async () => {
+  const ids = await Promise.all(Array.from({ length: 200 }, () => freshId('abc123')));
+  assert.ok(ids.every((id) => isValidId(id)), ids.find((id) => !isValidId(id)));
+  assert.equal(new Set(ids).size, ids.length, 'two runs of one eval never share an id');
 });
 
 test('jobs = prompts x variants x models x runs, shuffle is deterministic', () => {

@@ -65,7 +65,7 @@ export function runPickerLabel(e) {
   return [e?.id, e?.primary, e?.replies != null ? `${e.replies} replies` : null, prompt || null].filter(Boolean).join(' · ');
 }
 
-/** @returns {Promise<Array<{id, at, prompt, primary, models, replies, provider}>>} newest first */
+/** @returns {Promise<Array<{id, eval, at, prompt, primary, models, replies, provider}>>} newest first */
 export async function listRuns() {
   return (read(RUN_INDEX, []) || []).filter((e) => e && e.id);
 }
@@ -73,6 +73,16 @@ export async function listRuns() {
 /** The whole run, or null when it was never saved or has since been evicted. */
 export async function loadRun(id) {
   return read(RUN_PREFIX + id, null);
+}
+
+/**
+ * The newest run this browser has of one eval. A run's id is its own; the eval's id is the content-addressed one
+ * the spec plans to, and every run of it is a generation under that. Runs saved before runs had ids of their own
+ * were keyed by the eval's id, so for those the two are the same and the lookup still lands.
+ */
+export async function latestRunFor(evalId) {
+  const entry = (await listRuns()).find((e) => (e.eval || e.id) === evalId);
+  return entry ? loadRun(entry.id) : null;
 }
 
 /**
@@ -85,6 +95,7 @@ export async function saveRun(run) {
   if (!run?.id) return false;
   const entry = {
     id: run.id,
+    eval: run.spec_id || null,
     at: run.finished_at || new Date().toISOString(),
     prompt: runPromptLine(run),
     primary: run.spec?.primary || 'refusal',
