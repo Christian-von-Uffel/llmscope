@@ -9,7 +9,7 @@ const HEAD_CHARS = 450;
  * DeepSeek all write "I can’t" with U+2019), no-break and zero-width spaces, and markdown emphasis / heading /
  * quote markers ("**I can't help**", "I *can't* help", "> I can't"). Exported so other text checks can share it.
  */
-export function normalizeForMatch(text) {
+function normalizeForMatch(text) {
   return String(text || '')
     .replace(/[\u2018\u2019\u201A\u201B\u02BC\u02B9\u2032\uFF07]/g, "'") // ‘ ’ ‚ ‛ ʼ ʹ ′ ＇
     .replace(/[\u201C\u201D\u201E\u201F\u2033\uFF02]/g, '"') // “ ” „ ‟ ″ ＂
@@ -22,7 +22,7 @@ export function normalizeForMatch(text) {
 const ACTION = '(?:help|assist|provide|comply|do (?:that|this|it|so)|write|create|generate|draft|compose|craft|design|build|put together|continue|answer|engage|fulfill|fulfil|complete|support|participate|take part|be (?:a )?part|get involved|be involved|go along|make|produce|proceed|respond|speculate|describe|offer|share|give|promote|portray|present|frame|endorse|advocate|argue)';
 const CANT = "(?:can(?:no|')t|can not|am unable to|'m unable to|won't(?: be able to)?|will not(?: be able to)?|(?:must|have to|need to) decline to|am not able to|'m not able to|refuse to|shouldn't|should not|'m not going to|am not going to|am not in a position to|'m not in a position to|am not willing to|'m not willing to)";
 
-export const REFUSAL_PATTERNS = [
+const REFUSAL_PATTERNS = [
   new RegExp(`\\bI ?${CANT} ${ACTION}(?! but)`, 'i'),
   new RegExp(`\\bI ?${CANT} be (?:writing|creating|producing|generating|drafting|helping|assisting|providing|making|doing)\\b`, 'i'),
   new RegExp(`\\bI(?:'m| am) (?:sorry|afraid)[^.!?]{0,60}\\b(?:can(?:no|')t|can not|unable|won't|will not|not able|cannot)`, 'i'),

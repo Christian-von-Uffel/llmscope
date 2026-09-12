@@ -5,7 +5,7 @@
 //   setSentimentAnalyzer(async (text) => ({ score, comparative }))         // any function
 //   setSentimentAnalyzer(httpSentiment('http://localhost:8000/sentiment'))  // POST {text} -> {score, comparative?}
 
-export const LEXICON = {
+const LEXICON = {
   // threat / discomfort
   threatened: -3, threatening: -3, menacing: -3, dangerous: -3, danger: -3, unsafe: -3, attack: -3, attacked: -3, assault: -3, violent: -3, violence: -3,
   predator: -3, predatory: -3, criminal: -3, crime: -2, suspicious: -2, suspect: -2, hostile: -2, aggressive: -2, aggression: -2, intimidating: -2, intimidated: -2,

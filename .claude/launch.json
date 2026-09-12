@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "llmscope-dev",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--", "--port", "4321"],
+      "port": 4321
+    },
+    {
+      "name": "llmscope",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["bin/llmscope.js", "serve", "--port", "5173"],
+      "port": 5173
+    }
+  ]
+}

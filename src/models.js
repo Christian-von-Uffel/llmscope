@@ -1,7 +1,7 @@
 // OpenRouter model catalogue: live list, "latest frontier model per provider" defaults, cost estimates.
 // Works in Node and browsers (the list endpoint is public and allows CORS).
 
-export const MODELS_URL = 'https://openrouter.ai/api/v1/models';
+const MODELS_URL = 'https://openrouter.ai/api/v1/models';
 
 export const MAIN_PROVIDERS = [
   { prefix: 'openai', name: 'OpenAI' },
@@ -164,6 +164,26 @@ export function subtractModels(ids, selectors, models = []) {
   return { ids: ids.filter((id) => !drop.has(id)), removed: ids.filter((id) => drop.has(id)), unmatched };
 }
 
+/**
+ * A model set as a list of IDs: unique, order kept, blanks dropped. The same set ticked in a different order
+ * is still one set, which is what history and up-arrow recall need.
+ */
+export function cleanModels(ids) {
+  const list = typeof ids === 'string' ? [ids] : [].concat(ids || []);
+  const out = [];
+  for (const raw of list) {
+    const id = String(raw || '').trim();
+    if (id && !out.includes(id)) out.push(id);
+  }
+  return out;
+}
+
+/** Identity of a set: sorted, so gpt then claude is the same set as claude then gpt. */
+export const modelKey = (ids) => cleanModels(ids).slice().sort().join('\n');
+
+/** The form a set takes in a text field: comma-separated IDs, in the order they were picked. */
+export const formatModels = (ids) => cleanModels(ids).join(', ');
+
 export async function fetchModels({ fetchImpl = globalThis.fetch, signal, url = MODELS_URL } = {}) {
   const res = await fetchImpl(url, { signal });
   if (!res.ok) throw new Error(`model list HTTP ${res.status}`);
@@ -198,7 +218,7 @@ export function pickFrontier(models, providers = MAIN_PROVIDERS.slice(0, 8).map(
 }
 
 // What a reply usually costs in tokens: a short answer, plus a stretch of thinking for models that think by default.
-export const TYPICAL = { reply: 200, thinking: 1200 };
+const TYPICAL = { reply: 200, thinking: 1200 };
 
 /**
  * Spend for a plan. "typical" assumes TYPICAL-sized replies; "high" assumes every reply uses its whole budget

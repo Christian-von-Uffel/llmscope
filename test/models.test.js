@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeModel, isChatModel, isRunnableModel, pickFrontier, newestPerProvider, estimateCost, FRONTIER_DEFAULTS, formatUsd, resolveModels, subtractModels, modelFamily } from '../src/models.js';
+import { normalizeModel, isChatModel, isRunnableModel, pickFrontier, newestPerProvider, estimateCost, FRONTIER_DEFAULTS, formatUsd, resolveModels, subtractModels, modelFamily, cleanModels, formatModels, modelKey } from '../src/models.js';
 import { planRun } from '../src/engine.js';
 
 const raw = (id, created, prompt = '0.000001', completion = '0.000005', out = ['text']) => ({ id, name: id, created, pricing: { prompt, completion }, architecture: { output_modalities: out } });
@@ -94,6 +94,13 @@ test('subtractModels narrows a list by the same selectors', () => {
   assert.deepEqual(cut.ids, ['x-ai/grok-4.6', 'x-ai/grok-4-fast', 'x-ai/grok-3-mini']);
   assert.equal(cut.removed.length, 2);
   assert.deepEqual(subtractModels(ids, [], families).ids, ids);
+});
+
+test('a model set is the same set in any order, and formats as comma-separated IDs', () => {
+  assert.equal(modelKey(['openai/gpt-6-astra', 'google/gemini-3.8-flash']), modelKey(['google/gemini-3.8-flash', 'openai/gpt-6-astra']));
+  assert.deepEqual(cleanModels([' openai/gpt-6-astra ', '', 'openai/gpt-6-astra', 'x-ai/grok-4.6']), ['openai/gpt-6-astra', 'x-ai/grok-4.6']);
+  assert.equal(formatModels(['openai/gpt-6-astra', 'x-ai/grok-4.6']), 'openai/gpt-6-astra, x-ai/grok-4.6');
+  assert.equal(modelKey([]), '');
 });
 
 test('modelFamily strips the version, however it is attached to the name', () => {

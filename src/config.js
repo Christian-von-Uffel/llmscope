@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 
-export function configDir() {
+function configDir() {
   if (process.env.LLMSCOPE_CONFIG_DIR) return process.env.LLMSCOPE_CONFIG_DIR;
   const base = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
   return path.join(base, 'llmscope');
@@ -37,9 +37,4 @@ export async function resolveApiKey({ flag } = {}) {
   const cfg = await loadConfig();
   if (cfg.openrouter_api_key) return { key: cfg.openrouter_api_key, source: 'config' };
   return { key: null, source: null };
-}
-
-export function maskKey(key) {
-  if (!key) return '';
-  return key.length > 14 ? `${key.slice(0, 10)}…${key.slice(-4)}` : '••••';
 }

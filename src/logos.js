@@ -6,6 +6,16 @@ export function providerOf(modelId) {
   return String(modelId).split('/')[0];
 }
 
+/**
+ * The mark's drawable content without its <svg> wrapper, so one <defs> entry can serve every place it appears.
+ * The wrapper carried the fill, so whatever draws this must supply one — which is what lets a mark be tinted to
+ * the colour of the model it belongs to (see the responses sheet). Null when we have no mark for that provider.
+ */
+export function logoBody(modelId) {
+  const svg = LOGOS[providerOf(modelId)];
+  return svg ? svg.replace(/^<svg[^>]*>/, '').replace(/<\/svg>$/, '') : null;
+}
+
 /** data: URI for an <image> element, or null when we have no mark for that provider. */
 export function logoFor(modelId) {
   const svg = LOGOS[providerOf(modelId)];

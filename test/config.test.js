@@ -7,7 +7,7 @@ import path from 'node:path';
 const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'llmscope-cfg-'));
 process.env.LLMSCOPE_CONFIG_DIR = dir;
 delete process.env.OPENROUTER_API_KEY;
-const { saveConfig, loadConfig, updateConfig, resolveApiKey, configPath, maskKey } = await import('../src/config.js');
+const { saveConfig, loadConfig, updateConfig, resolveApiKey, configPath } = await import('../src/config.js');
 
 test('config round-trips with 0600 permissions', async () => {
   await saveConfig({ openrouter_api_key: 'sk-or-v1-abcdefghijklmnop' });
@@ -25,5 +25,4 @@ test('key precedence: flag > env > config; clear removes', async () => {
   delete process.env.OPENROUTER_API_KEY;
   await updateConfig({ openrouter_api_key: null });
   assert.equal((await resolveApiKey({})).key, null);
-  assert.equal(maskKey('sk-or-v1-abcdefghijklmnop'), 'sk-or-v1-a…mnop');
 });

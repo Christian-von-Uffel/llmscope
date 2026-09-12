@@ -1,3 +1,13 @@
 node_modules/
 out/
 .DS_Store
+
+# The website's build, and the static files gathered into it. Everything under site/public/ except the favicon
+# is a copy of something already in the repo, put there by scripts/build-site-assets.mjs.
+dist/
+.astro/
+site/public/*
+!site/public/favicon.svg
+
+# Local Vercel state: the linked project and its pulled environment. Added by the Vercel CLI.
+.vercel

@@ -23,7 +23,7 @@ test('mock run is complete, deterministic, and renders a card', async () => {
   assert.equal(a.rows.length, 3);
   assert.equal(a.variants.length, 2);
   for (const row of a.rows) for (const cell of row.cells) assert.equal(cell.n, 4);
-  assert.match(a.summary.headline, /OF 3 MODELS TESTED DIFFER BY GROUP/);
+  assert.match(a.summary.headline, /OF 3 MODELS TESTED DIFFER BY WORDING/);
   const svg = renderCard(a);
   assert.ok(svg.startsWith('<svg'));
   assert.ok(svg.includes('gpt-5.2') && svg.includes('MOCK DATA') && svg.includes(a.id));
@@ -32,8 +32,8 @@ test('mock run is complete, deterministic, and renders a card', async () => {
 test('keyword primary produces the standard legend and headline; title/labels are ignored', async () => {
   const run = await runEval({ prompts: ["Whatever you do, don't think of pink elephants."], models: ['openai/gpt-5.2', 'google/gemini-3-pro'], primary: 'keyword', keywords: ['pink elephant'], title: 'Custom', labels: { pass: 'complied', fail: 'broke it' } }, { provider: createMockProvider() });
   const a = analyze(run);
-  assert.equal(a.legend[0].label, 'response did not include “pink elephant”');
-  assert.equal(a.legend[1].label, 'response included “pink elephant”');
+  assert.equal(a.legend[0].label, 'matched “pink elephant”');
+  assert.equal(a.legend[1].label, 'no keywords matched');
   assert.match(a.summary.headline, /OF 2 MODELS TESTED INCLUDED “PINK ELEPHANT”/);
   assert.match(a.title.kicker, /^KEYWORD INCLUSION · /);
   const svg = renderCard(a);

@@ -1,11 +1,13 @@
 // Share card: one finding in words, one number per cell, nothing that dies at thumbnail size.
-import { COLORS, keywordPhrase, METRIC_LABEL } from './analyze.js';
-import { esc, textWidth, wrap, fit, shortModel, clamp, titleLine, fitTitleBlock, readableLines, TITLE, GROW_MAX } from './render.js';
+import { COLORS, keywordPhrase, noKeywordsYet, METRIC_LABEL, brandLine, countedLine, runsLine } from './analyze.js';
+import { esc, textWidth, wrap, fit, shortModel, clamp, fillLastLine, promptBlock, TITLE, GROW_MAX } from './render.js';
+import { pinTextWidths } from './text.js';
 import { logoFor } from './logos.js';
 
 const SANS = "'DejaVu Sans', 'Helvetica Neue', Helvetica, Arial, sans-serif";
 const MONO = "'DejaVu Sans Mono', Menlo, Consolas, monospace";
-const q = (s) => `“${s === '' ? 'none' : s}”`;
+/** A value as the card quotes it, empty included. Shared with the keyword card so the two never disagree. */
+export const quoted = (s) => `“${s === '' ? 'none' : s}”`;
 
 export function prettyName(id, names = {}) {
   if (names[id]) return names[id].replace(/^[^:]+:\s*/, '');
@@ -17,12 +19,15 @@ export function findingFor(a) {
   const { spec, rows, variants } = a;
   const n = rows.length;
   const p = spec.primary;
+  // Nothing was scored, so there is no finding and the sentence says exactly that rather than reporting a
+  // rate of zero against a word that was never named.
+  if (noKeywordsYet(spec)) return { headline: `${n} model${n === 1 ? '' : 's'} answered; no keywords set yet`, direction: null };
   const kwPhrase = spec.keywords.length <= 3 ? `used ${keywordPhrase(spec)}` : `used at least one of ${spec.keywords.length} keywords`;
   if (variants.length > 1) {
     const flagged = rows.filter((r) => r.flagged);
     const k = flagged.length;
     const verb = p === 'refusal' ? 'refuse' : p === 'keyword' ? kwPhrase.replace(/^used/, 'use') : 'reply negatively';
-    if (!k) return { headline: `No model ${p === 'refusal' ? 'refuses' : p === 'keyword' ? verb.replace(/^use/, 'uses') : 'replies negatively'} at different rates by group`, direction: null };
+    if (!k) return { headline: `No model ${p === 'refusal' ? 'refuses' : p === 'keyword' ? verb.replace(/^use/, 'uses') : 'replies negatively'} at different rates depending on the wording`, direction: null };
     const worst = (row) => row.cells.filter((c) => c.n).reduce((best, c) => (p === 'sentiment' ? c.primary_value < best.primary_value : c.primary_value > best.primary_value) ? c : best);
     const tops = flagged.map((r) => worst(r).variantLabel);
     const same = tops.every((t) => t === tops[0]);
@@ -30,11 +35,11 @@ export function findingFor(a) {
       const g = tops[0];
       if (variants.length === 2) {
         const other = variants.find((v) => v.label !== g).label;
-        return { headline: `${k} of ${n} models ${verb} more often for ${q(g)} than for ${q(other)}`, direction: g };
+        return { headline: `${k} of ${n} models ${verb} more often for ${quoted(g)} than for ${quoted(other)}`, direction: g };
       }
-      return { headline: `${k} of ${n} models ${verb} most often for ${q(g)}`, direction: g };
+      return { headline: `${k} of ${n} models ${verb} most often for ${quoted(g)}`, direction: g };
     }
-    return { headline: `${k} of ${n} models ${verb} at different rates by group`, direction: null };
+    return { headline: `${k} of ${n} models ${verb} at different rates depending on the wording`, direction: null };
   }
   if (p === 'keyword') return { headline: `${rows.filter((r) => r.matchedAny).length} of ${n} models ${kwPhrase} in their reply`, direction: null };
   if (p === 'sentiment') return { headline: `${rows.filter((r) => r.cells[0]?.sentiment_mean < 0).length} of ${n} models replied negatively`, direction: null };
@@ -49,7 +54,7 @@ function cellWords(cell, primary) {
   return `${count}/${cell.n}`;
 }
 
-function monthStamp(iso) {
+export function monthStamp(iso) {
   const d = iso ? new Date(iso) : new Date();
   return d.toLocaleString('en-US', { month: 'short', year: 'numeric' }).toUpperCase();
 }
@@ -61,7 +66,7 @@ export function setupLine(a) {
   return [
     METRIC_LABEL[s.primary] || s.primary.toUpperCase(),
     `${a.rows.length} MODELS`,
-    groups > 1 ? `${groups} GROUPS` : null,
+    groups > 1 ? `${groups} WORDINGS` : null,
     s.prompts.length > 1 ? `${s.prompts.length} PROMPTS` : null,
     a.summary.runs_per_cell > 1 ? `${a.summary.runs_per_cell} RUNS EACH` : null,
   ].filter(Boolean).join(' · ');
@@ -69,22 +74,29 @@ export function setupLine(a) {
 
 /**
  * @param {object} opts
- * @param {'finding'|'prompt'} [opts.title] finding: generated sentence as headline, prompt quoted below.
- *   prompt: the prompt is the headline and no finding is stated, so viewers draw their own conclusion.
+ * @param {'prompt'|'finding'} [opts.title] prompt (the default): every prompt the run sent is the headline and no
+ *   finding is stated, so viewers draw their own conclusion from what was asked and what came back.
+ *   finding: the generated sentence is the headline and the first prompt is quoted small below it.
  */
-export function renderShareCard(a, { width = 1600, height = 1600, names = {}, url = null, date = null, title = 'finding' } = {}) {
+export function renderShareCard(a, { width = 1600, height = 1600, names = {}, url = null, date = null, title = 'prompt' } = {}) {
   const W = width; const H = height; const pad = 64;
   const shareUrl = url || `${a.spec.share_base || ''}${a.id}`;
   const parts = [`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`, `<rect width="${W}" height="${H}" fill="${COLORS.bg}"/>`];
   const text = (x, y, str, { size = 24, weight = 400, fill = COLORS.text, font = SANS, anchor = 'start', extra = '' } = {}) =>
     parts.push(`<text x="${x}" y="${y}" text-anchor="${anchor}" font-family="${font}" font-size="${size}" font-weight="${weight}" fill="${fill}" ${extra}>${esc(str)}</text>`);
 
-  // top strip: brand + date
-  let y = pad + 22;
-  text(pad, y, 'llmscope', { size: 26, weight: 700, fill: COLORS.muted, font: MONO, extra: 'letter-spacing="2"' });
-  text(W - pad, y, `${monthStamp(date)}${a.mock ? ' · MOCK DATA' : ''}`, { size: 26, fill: a.mock ? COLORS.accent : COLORS.muted, font: MONO, anchor: 'end', extra: 'letter-spacing="2"' });
-
   const maxW = W - pad * 2;
+  // top strip: brand + what was measured, then the date. The name alone says who made the image; it does not say
+  // what the image is, and the reader of a screenshot has nothing else to go on. Both halves are measured with
+  // their letter-spacing charged in — SVG adds tracking after every glyph and the font metrics know nothing about
+  // it — so the brand gives way rather than running under the date.
+  let y = pad + 22;
+  const stamp = `${monthStamp(date)}${a.mock ? ' · MOCK DATA' : ''}`;
+  const brand = brandLine(a);
+  const stampW = textWidth(stamp, 26, false, true) + 2 * stamp.length;
+  text(pad, y, brand, { size: fit(brand, 26, maxW - stampW - 40, true, 15, true, 2), weight: 700, fill: COLORS.muted, font: MONO, extra: 'letter-spacing="2"' });
+  text(W - pad, y, stamp, { size: 26, fill: a.mock ? COLORS.accent : COLORS.muted, font: MONO, anchor: 'end', extra: 'letter-spacing="2"' });
+
   const quoted = `“${a.title.prompt}”`;
   // Grid geometry first: the results are the point of the card, so the title may only use the height the rows do not
   // need. Rows never go below TITLE.minRowH, however long the prompt is.
@@ -95,27 +107,40 @@ export function renderShareCard(a, { width = 1600, height = 1600, names = {}, ur
   const headerH = colsN > 1 || a.variants[0]?.label !== '—' ? 80 : 0;
   const gridBottom = H - footerH;
   if (title === 'prompt') {
-    // neutral setup line, then the prompt itself as the headline (slots highlighted); no finding stated
-    y += 46;
-    text(pad, y, setupLine(a), { size: fit(setupLine(a), 26, maxW, false, 16, true), fill: COLORS.muted, font: MONO, extra: 'letter-spacing="3"' });
-    // The prompt's measure decides how many lines it takes (8-12 words each); pretext then sizes it to fill them.
-    // A prompt too long for its share of the card borrows the height the grid can spare, and no more.
+    // The prompt is the heading, and what was counted is the line under it. A reader cannot judge a number without
+    // holding the question it answers, so the question goes first and the measure second; the setup line that used
+    // to sit above the prompt led with a category — a metric name and a count of "groups" — that the reader had
+    // not met yet, and spent the top of the card on it.
+    y += 40;
+    // Every prompt the run sent is quoted, all at one size, so none of them reads as the one that mattered. Each
+    // prompt's measure decides how many lines it takes (8-12 words each); pretext then sizes the whole block to
+    // fill them. A block too long for its share of the card borrows the height the grid can spare, and no more —
+    // and if even that is not enough, the prompts that still read are quoted and the rest are counted off. The
+    // card would rather admit it left one out than shrink them all past reading size.
+    const sub = countedLine(a.spec);
+    const subSize = fit(sub, 38, maxW, false, 20);
+    // The subheading is charged for before the prompt takes its share, so a long prompt cannot crowd it out.
+    const subH = subSize * 1.3 + 20;
     const gridMinH = headerH + rowsN * TITLE.minRowH + gap * (rowsN - 1);
-    const availableH = Math.max(TITLE.floorSize * TITLE.lineHeight, Math.min(H * 0.42, gridBottom - (y + 24) - (a.title.more ? 34 : 0) - 44 - gridMinH));
-    const measure = readableLines(quoted);
-    let block = fitTitleBlock(quoted, maxW, { maxHeight: Math.min(H * 0.30, availableH), maxSize: 64 * GROW_MAX, minSize: TITLE.minSize, maxLines: measure });
-    if (block.overflow) block = fitTitleBlock(quoted, maxW, { maxHeight: availableH, maxSize: TITLE.minSize, minSize: TITLE.floorSize, maxLines: measure });
-    if (block.overflow) block = { size: TITLE.floorSize, lines: wrap(quoted, TITLE.floorSize, maxW, Math.max(1, Math.floor(availableH / (TITLE.floorSize * TITLE.lineHeight)))), overflow: true, truncated: true };
-    const state = { inSlot: false };
-    y += 24;
-    for (const line of block.lines) { y += block.size * TITLE.lineHeight; parts.push(titleLine(line, pad, y, block.size, state)); }
-    if (a.title.more) { y += 34; text(pad, y, a.title.more, { size: 24, fill: COLORS.muted }); }
+    const availableH = Math.max(TITLE.floorSize * TITLE.lineHeight, Math.min(H * 0.40, gridBottom - y - 44 - subH - gridMinH));
+    const block = promptBlock(a.title.prompts, {
+      x: pad, y, maxWidth: maxW, maxHeight: availableH, preferredHeight: Math.min(H * 0.28, availableH),
+      slots: a.title.slots, maxSize: 64 * GROW_MAX,
+    });
+    parts.push(...block.svg);
+    // Grey, and not the accent or the body white: the prompt above sets its slots in amber and the rest in white,
+    // so either of those would read as another line of the heading rather than as the line that describes it. The
+    // tone break is what separates them; it does the work that would otherwise cost the grid a band of white space.
+    y = block.bottom + 20 + subSize;
+    text(pad, y, sub, { size: subSize, fill: COLORS.muted });
     y += 44;
   } else {
     // headline: the finding
     const finding = findingFor(a);
     let hs = 76; let lines;
     for (;;) { lines = wrap(finding.headline, hs, maxW, Infinity); if (lines.length <= 3 || hs <= 44) break; hs -= 2; }
+    // A headline ending on one stranded word reads as a mistake. The measure gives way, never the size.
+    lines = fillLastLine(finding.headline, hs, maxW, lines);
     y += 50;
     for (const line of lines) { y += hs * 1.08; text(pad, y, line, { size: hs, weight: 700 }); }
     // prompt, quoted, small
@@ -169,24 +194,32 @@ export function renderShareCard(a, { width = 1600, height = 1600, names = {}, ur
     });
   });
 
-  // footer
-  const fy = H - 52;
-  let lx = pad;
+  // footer: the key on its own line, then the method and the link under it. The legend used to share a line with
+  // the URL and shrink until it collided with it; giving it the full width is what lets it be sized rather than
+  // squeezed. Every part of it is measured — swatch, gap, label, the space to the next item — so the size that
+  // comes out is the largest one that actually fits, not the smallest one the loop was allowed to reach.
+  const legendY = H - 82;
+  const metaY = H - 32;
   const legend = a.legend.filter((l) => l.key !== 'error' || a.rows.some((r) => r.cells.some((c) => c.errors)));
-  const legendMax = W - pad * 2 - textWidth(shareUrl, 30, false, true) - 48;
+  const ITEM_GAP = 36;
+  const legendWidth = (sz) => legend.reduce((w, item) => w + sz + 12 + textWidth(item.label, sz), 0) + ITEM_GAP * (legend.length - 1);
   let ls2 = 26;
-  const legendWidth = (sz) => legend.reduce((w, item) => w + sz + 12 + textWidth(item.label, sz) + 36, 0);
-  while (legendWidth(ls2) > legendMax && ls2 > 16) ls2 -= 1;
+  while (legendWidth(ls2) > maxW && ls2 > 14) ls2 -= 1;
+  let lx = pad;
   for (const item of legend) {
-    parts.push(`<rect x="${lx}" y="${fy - ls2 + 4}" width="${ls2}" height="${ls2}" rx="5" fill="${item.color}"/>`);
+    parts.push(`<rect x="${lx.toFixed(1)}" y="${(legendY - ls2 + 4).toFixed(1)}" width="${ls2}" height="${ls2}" rx="5" fill="${item.color}"/>`);
     lx += ls2 + 12;
-    text(lx, fy, item.label, { size: ls2 });
-    lx += textWidth(item.label, ls2) + 36;
+    text(lx.toFixed(1), legendY, item.label, { size: ls2 });
+    lx += textWidth(item.label, ls2) + ITEM_GAP;
   }
-  const meta = [`${a.summary.runs_per_cell} run${a.summary.runs_per_cell > 1 ? 's' : ''} per cell`, `temperature ${a.spec.temperature}`, 'each value sent as its own request', `id ${a.id}`].join(' · ');
-  text(pad, fy + 38, meta, { size: 20, fill: COLORS.muted, font: MONO });
-  text(W - pad, fy, shareUrl, { size: 30, font: MONO, anchor: 'end' });
-  text(W - pad, fy + 38, 'rerun it yourself', { size: 20, fill: COLORS.muted, anchor: 'end' });
+  // What a reader cannot deduce from the image, and nothing else. The id is already the last path segment of the
+  // link beside it, and "each value sent as its own request" describes the harness rather than this run. "Per
+  // cell" named a thing only the person who drew the grid can see; the reader sees models and groups, so the
+  // line counts in those.
+  const meta = [runsLine(a), `temperature ${a.spec.temperature}`].join(' · ');
+  text(W - pad, metaY, shareUrl, { size: 30, font: MONO, anchor: 'end' });
+  // The method line gives way to the link rather than running under it.
+  text(pad, metaY, meta, { size: fit(meta, 22, maxW - textWidth(shareUrl, 30, false, true) - 40, false, 12, true), fill: COLORS.muted, font: MONO });
   parts.push('</svg>');
-  return parts.join('\n');
+  return pinTextWidths(parts.join('\n'));
 }

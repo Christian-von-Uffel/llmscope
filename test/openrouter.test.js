@@ -1,6 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createOpenRouterProvider, estimateTokens, reasoningPlan } from '../src/providers/openrouter.js';
+import { createOpenRouterProvider, estimateTokens, reasoningPlan, maskKey } from '../src/providers/openrouter.js';
+
+test('a masked key shows its ends and never its middle; a key too short to mask shows nothing', () => {
+  assert.equal(maskKey('sk-or-v1-abcdefghijklmnop'), 'sk-or-v1-a…mnop');
+  assert.equal(maskKey('sk-or-short'), '••••');
+  assert.equal(maskKey(''), '');
+  assert.equal(maskKey(null), '');
+});
 
 const reply = (body) => ({ ok: true, status: 200, headers: new Headers(), json: async () => body });
 const chat = (usage = { prompt_tokens: 5, completion_tokens: 1 }) => ({ choices: [{ message: { content: 'hi' }, finish_reason: 'stop' }], usage });

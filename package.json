@@ -4,11 +4,44 @@
   "description": "Deterministic LLM bias eval harness: swap identity variables in a prompt, run across models via OpenRouter (bring your own key), measure refusals, keywords, length and sentiment, and render a shareable card.",
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Christian-von-Uffel/llmscope.git"
+  },
+  "homepage": "https://github.com/Christian-von-Uffel/llmscope#readme",
+  "bugs": {
+    "url": "https://github.com/Christian-von-Uffel/llmscope/issues"
+  },
+  "keywords": [
+    "llm",
+    "bias",
+    "eval",
+    "fairness",
+    "openrouter",
+    "refusal",
+    "benchmark",
+    "ai-safety"
+  ],
+  "files": [
+    "bin/",
+    "src/",
+    "web/",
+    "assets/",
+    "examples/",
+    "dist/",
+    "README.md",
+    "LICENSE"
+  ],
   "bin": {
     "llmscope": "bin/llmscope.js"
   },
   "scripts": {
     "test": "node --test test/*.test.js",
+    "assets": "node scripts/build-site-assets.mjs",
+    "dev": "npm run assets && astro dev",
+    "build": "npm run assets && astro build",
+    "preview": "astro preview",
+    "prepare": "[ -n \"$CI\" ] || npm run build || echo 'llmscope: the website did not build, so llmscope serve has nothing to serve. The CLI itself is unaffected.'",
     "serve": "node bin/llmscope.js serve --port 5173",
     "demo": "node bin/llmscope.js run examples/identity-swap.json --provider mock --yes",
     "start": "node bin/llmscope.js"
@@ -27,6 +60,7 @@
     "dejavu-fonts-ttf": "^2.37.3"
   },
   "devDependencies": {
-    "@lobehub/icons-static-svg": "^1.95.0"
+    "@lobehub/icons-static-svg": "^1.95.0",
+    "astro": "^7.3.2"
   }
 }

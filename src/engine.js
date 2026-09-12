@@ -5,7 +5,7 @@ import { runChecks } from './checks/index.js';
 import { detectRefusal } from './checks/refusal.js';
 import { detectKeywords } from './checks/keywords.js';
 
-export const VERSION = 'llmscope/0.1';
+const VERSION = 'llmscope/0.1';
 
 export async function planRun(input) {
   const spec = normalizeSpec(input);

@@ -1,0 +1,318 @@
+// Keyword card: which words the models used, which group they landed on, and which family said them most.
+//
+// It is the terminal's counts table, widened. Rows are the marked words. The left block is word × group and the
+// right block is word × family, and both blocks are ordered by size, so reading left to right is reading a
+// ranking rather than an alphabet: groups run from the one the words landed on hardest to the one they missed,
+// and families from the one whose replies used the words most often to the one that used them least. That makes
+// the leftmost family the one inserting the most of this wording, and puts the largest cell of the largest row
+// in the top-left corner.
+//
+// Every cell carries its own number, because the point of the card is to be read rather than estimated. The bar
+// under a family number and the bar behind a group number are the same measure — replies that used the word over
+// replies asked — drawn against ceilings printed under the card.
+import { COLORS, brandLine, runsLine } from './analyze.js';
+import { esc, textWidth, wrap, fit, clamp, fillLastLine, promptBlock, TITLE, GROW_MAX } from './render.js';
+import { prettyName, monthStamp, quoted } from './render-share.js';
+import { keywordGrid } from './keyword-grid.js';
+import { modelFamily } from './models.js';
+import { logoFor } from './logos.js';
+import { pinTextWidths } from './text.js';
+
+const SANS = "'DejaVu Sans', 'Helvetica Neue', Helvetica, Arial, sans-serif";
+const MONO = "'DejaVu Sans Mono', Menlo, Consolas, monospace";
+const pct = (x) => `${Math.round(x * 100)}%`;
+/** Gaps are spelled out. "pp" saves four characters and costs the reader the sentence. */
+const points = (x) => `${Math.round(x * 100)} point${Math.round(x * 100) === 1 ? '' : 's'}`;
+
+/** Past this many words the rows are too thin to read; the rest are counted off under the grid. */
+export const MAX_ROWS = 12;
+/** Bars are drawn against a stated ceiling rather than always against 100%: a card where the highest rate is 29% */
+/** would spend two thirds of its width on white space. The ceiling is printed under the card, so nothing is implied. */
+const CEILINGS = [0.1, 0.15, 0.2, 0.25, 0.3, 0.4, 0.5, 0.6, 0.75, 1];
+export const ceilingFor = (max) => CEILINGS.find((c) => max <= c + 1e-9) ?? 1;
+/** The light rule that marks where a bar ends, so its length is read off a luminance edge rather than a hue. */
+export const CAP = COLORS.text;
+const CAP_W = 5;
+/** Letter-spacing on the line above the prompts. It is measured as well as drawn, or the line runs off the card. */
+const TRACK = 3;
+
+const ACRONYMS = /^(gpt|glm|grok|qwen|llama|deepseek|o\d+)$/i;
+/** A family slug as a heading: “gpt” is GPT, “claude” is Claude. */
+export function familyName(family) {
+  const slug = String(family || '');
+  if (!slug) return '?';
+  return ACRONYMS.test(slug) ? slug.toUpperCase() : slug[0].toUpperCase() + slug.slice(1);
+}
+
+/**
+ * What a keyword card counted, for the cards that state no finding: the setup, not the result. The lead names the
+ * question rather than the method, because nobody opens the card wanting a count — they want to know whether a
+ * word turns up more for one group than for another. It stays a question about where words appeared, never about
+ * what a model chose: appearing in an output is all the run measured.
+ */
+export function keywordSetup(a, grid) {
+  const n = grid.rows.length;
+  const grouped = grid.variants.length > 1;
+  return [
+    grouped ? 'WHICH WORDS APPEAR FOR WHICH WORDING' : 'WHICH WORDS APPEAR, AND IN WHOSE OUTPUTS',
+    // The word count survives because rows past MAX_ROWS are left off the card. The group count does not: the
+    // lead already says the words are split by group, and every group is named across the top of its own column.
+    `${n} ${n === 1 ? 'WORD' : 'WORDS'}`,
+    `${grid.models.length} ${grid.models.length === 1 ? 'MODEL' : 'MODELS'}`,
+    a.spec.prompts.length > 1 ? `${a.spec.prompts.length} PROMPTS` : null,
+    a.summary.runs_per_cell > 1 ? `${a.summary.runs_per_cell} RUNS EACH` : null,
+  ].filter(Boolean).join(' · ');
+}
+
+/**
+ * The finding as a sentence. The headline is the model's performance — the family these words landed on hardest,
+ * the one word that landed there hardest, and what the rest of the field did with that same word — because "which
+ * model is doing this" is what a reader carries away. The gap between groups is what the card is arranged around,
+ * so it keeps the line under the headline rather than the headline itself. Neither claim is dressed up: a gap too
+ * small to flag says so, and the family line is a hit rate, not an accusation.
+ */
+export function keywordFinding(grid, names = {}) {
+  const { rows, separating, variants, threshold, families } = grid;
+  const n = rows.length;
+  const words = (k) => `${k} ${k === 1 ? 'word' : 'words'}`;
+  if (!rows.length) return { kicker: 'NO WORDS COUNTED', headline: 'Nothing was marked in these outputs' };
+
+  // The family the words landed on hardest, and its own hardest word. Both numbers are cells a reader can find on
+  // the card: the rate is printed in that family's column, not a figure computed only for the sentence.
+  const top = families[0];
+  const lead = top && top.rate > 0
+    ? rows
+      .map((row) => ({ row, cell: row.byFamily.find((f) => f.family === top.family) }))
+      .filter((x) => x.cell && x.cell.n && x.cell.rate > 0)
+      .sort((x, y) => y.cell.rate - x.cell.rate || y.cell.replies - x.cell.replies || x.row.label.localeCompare(y.row.label))[0]
+    : null;
+  const field = lead ? lead.row.byFamily.filter((f) => f.family !== top.family && f.n) : [];
+  const mean = field.length ? field.reduce((s, f) => s + f.rate, 0) / field.length : 0;
+  // "found in" rather than "used": a word appearing in an output is all the run measured. "Used" would put a
+  // choice behind it that nothing here establishes, and that is the difference the card exists to not overstate.
+  const headline = lead
+    ? `${quoted(lead.row.label)} found in ${pct(lead.cell.rate)} of ${familyName(top.family)}’s outputs${field.length ? `, against ${pct(mean)} across the other ${field.length === 1 ? 'family' : `${field.length} families`}` : ''}`
+    : 'None of these words was found in any output';
+
+  if (variants.length < 2) {
+    const used = rows.filter((r) => r.replies).length;
+    // No groups to separate, so the second line is the field: what the same word did across every family.
+    const overall = lead ? lead.row.byVariant.reduce((s, v) => s + v.replies, 0) / Math.max(1, lead.row.byVariant.reduce((s, v) => s + v.n, 0)) : 0;
+    return {
+      kicker: `KEYWORD USE · ${words(used)} OF ${n} FOUND`.toUpperCase(),
+      headline,
+      note: lead ? `Across all ${families.length} ${families.length === 1 ? 'family' : 'families'}, ${quoted(lead.row.label)} was found in ${pct(overall)} of outputs` : null,
+    };
+  }
+
+  const widest = rows.filter((r) => r.delta).sort((x, y) => y.delta - x.delta)[0];
+  if (!widest) {
+    return {
+      kicker: `KEYWORD DISPARITY · NO WORD OF ${n} SEPARATES THE WORDINGS BY ${points(threshold).toUpperCase()}`,
+      headline,
+      note: lead ? 'These words were found at the same rate for every wording' : null,
+    };
+  }
+  const hi = widest.byVariant.find((v) => v.variant === widest.top);
+  const lo = widest.byVariant.find((v) => v.variant === widest.low);
+  const gap = `${quoted(widest.label)}: ${pct(hi.rate)} of outputs for ${quoted(hi.variant)} against ${pct(lo.rate)} for ${quoted(lo.variant)}`;
+  return {
+    kicker: separating.length
+      ? `KEYWORD DISPARITY · ${words(separating.length)} OF ${n} SEPARATE THE WORDINGS`.toUpperCase()
+      : `KEYWORD DISPARITY · NO WORD OF ${n} SEPARATES THE WORDINGS BY ${points(threshold).toUpperCase()}`,
+    headline,
+    note: `The widest gap between wordings is ${gap}`,
+  };
+}
+
+/** How tall a word's row may get before the heading has to give way. Below this the bars stop being readable. */
+export const MIN_ROW_H = 56;
+
+/**
+ * @param {object} run the saved run, for the replies themselves
+ * @param {object} a its analysis, for the prompt heading and the run metadata
+ * @param {string[]} terms the words to count — the run's own keywords, or whatever it was told to mark
+ * @param {'prompt'|'finding'} [opts.title] prompt (the default): every prompt the run sent is the heading and no
+ *   finding is stated — the reader sees what was asked and reads the grid for what came back.
+ *   finding: the family these words landed on hardest is the headline, with the widest group gap under it.
+ */
+export function renderKeywordCard(run, a, terms, { width = 1600, height = 1600, names = {}, url = null, date = null, results = run.results, title = 'prompt' } = {}) {
+  const W = width; const H = height; const pad = 64;
+  const grid = keywordGrid(run, terms, { results, familyOf: modelFamily });
+  const shown = grid.rows.slice(0, MAX_ROWS);
+  const hidden = grid.rows.length - shown.length;
+  const lines = shown;
+  const single = grid.variants.length < 2;
+  const shareUrl = url || `${a.spec.share_base || ''}${a.id}`;
+  const parts = [`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`, `<rect width="${W}" height="${H}" fill="${COLORS.bg}"/>`];
+  const text = (x, y, str, { size = 24, weight = 400, fill = COLORS.text, font = SANS, anchor = 'start', opacity = 1, extra = '' } = {}) =>
+    parts.push(`<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" text-anchor="${anchor}" font-family="${font}" font-size="${size}" font-weight="${weight}" fill="${fill}"${opacity < 1 ? ` opacity="${opacity}"` : ''} ${extra}>${esc(str)}</text>`);
+  const rect = (x, y, w, h, fill, { rx = 6, opacity = 1 } = {}) =>
+    parts.push(`<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${Math.max(0, w).toFixed(1)}" height="${Math.max(0, h).toFixed(1)}" rx="${rx}" fill="${fill}"${opacity < 1 ? ` opacity="${opacity}"` : ''}/>`);
+
+  // ---- heading ----
+  let y = pad + 22;
+  const maxW = W - pad * 2;
+  // The same brand line the share card carries, measured the same way: this image and that one come out of one
+  // run, and a reader who meets either of them alone should be told what it measures.
+  const stamp = `${monthStamp(date)}${a.mock ? ' · MOCK DATA' : ''}`;
+  const brand = brandLine(a);
+  const stampW = textWidth(stamp, 26, false, true) + 2 * stamp.length;
+  text(pad, y, brand, { size: fit(brand, 26, maxW - stampW - 40, true, 15, true, 2), weight: 700, fill: COLORS.muted, font: MONO, extra: 'letter-spacing="2"' });
+  text(W - pad, y, stamp, { size: 26, fill: a.mock ? COLORS.accent : COLORS.muted, font: MONO, anchor: 'end', extra: 'letter-spacing="2"' });
+
+  const footerH = 100; // one line of metadata and the share link; the legend that used to sit above them is gone
+  const headerH = 120; // logos, names and group headings; the caption that used to sit above them is gone
+  const gridBottom = H - footerH;
+  const rowGap = 10;
+  // The grid is the card, so the heading may only use the height the words do not need.
+  const gridMinH = headerH + lines.length * MIN_ROW_H + rowGap * (lines.length - 1);
+
+  if (title === 'prompt') {
+    // What was asked, and nothing about what came back. Every cell pools the run's prompts, so all of them are
+    // quoted at one size: a card that showed the first alone would invite the reader to pin the numbers on it.
+    y += 50;
+    const setup = keywordSetup(a, grid);
+    text(pad, y, setup, { size: fit(setup, 26, maxW, false, 15, true, TRACK), fill: COLORS.muted, font: MONO, extra: `letter-spacing="${TRACK}"` });
+    const availableH = Math.max(TITLE.floorSize * TITLE.lineHeight, Math.min(H * 0.32, gridBottom - (y + 24) - 42 - gridMinH));
+    const block = promptBlock(a.title.prompts, {
+      x: pad, y: y + 24, maxWidth: maxW, maxHeight: availableH, preferredHeight: Math.min(H * 0.24, availableH),
+      slots: a.title.slots, maxSize: TITLE.maxSize * GROW_MAX,
+    });
+    parts.push(...block.svg);
+    y = block.bottom + 42;
+  } else {
+    const finding = keywordFinding(grid, names);
+    y += 50;
+    text(pad, y, finding.kicker, { size: fit(finding.kicker, 26, maxW, false, 15, true, TRACK), fill: COLORS.muted, font: MONO, extra: `letter-spacing="${TRACK}"` });
+    let hs = 58;
+    let head;
+    for (;;) { head = wrap(finding.headline, hs, maxW, Infinity); if (head.length <= 3 || hs <= 36) break; hs -= 2; }
+    // A headline that ends on one stranded word reads as a mistake; the measure gives way rather than the size.
+    head = fillLastLine(finding.headline, hs, maxW, head);
+    y += 24;
+    for (const l of head) { y += hs * 1.1; text(pad, y, l, { size: hs, weight: 700 }); }
+    if (finding.note) { y += 40; text(pad, y, finding.note, { size: fit(finding.note, 27, maxW, false, 18), fill: COLORS.accent }); }
+    // The finding already took the top of the card, so the prompts are quoted small under it and any that do not
+    // fit are counted off. The prompt-title card is the one that shows them all.
+    const promptQuote = `“${a.title.prompt}”`;
+    const ps = 25;
+    y += 18;
+    for (const l of wrap(promptQuote, ps, maxW, 2, false)) { y += ps * 1.25; text(pad, y, l, { size: ps, fill: COLORS.muted }); }
+    if (a.title.more) { y += ps * 1.25; text(pad, y, a.title.more, { size: ps, fill: COLORS.muted }); }
+    y += 42;
+  }
+
+  // ---- geometry: two blocks of columns, sharing the rows ----
+  const gutter = 22;
+  const gridTop = y;
+  const labelW = clamp(200, Math.round(maxW * 0.16), 260);
+  const G = Math.max(1, grid.variants.length);
+  const F = Math.max(1, grid.families.length);
+  // Group cells are the primary comparison and get the wider target; when there is room to spare it goes to them.
+  const room = maxW - labelW - gutter;
+  const want = G * 112 + F * 88;
+  const shrink = Math.min(1, room / want);
+  const famW = (F * 88 * shrink) / F;
+  const groupW = (room - famW * F) / G;
+  const varX = pad + labelW;
+  const famX = varX + groupW * G + gutter;
+  const available = gridBottom - gridTop - headerH - rowGap * (lines.length - 1);
+  const rowH = clamp(MIN_ROW_H, available / Math.max(1, lines.length), 150);
+  const slack = Math.max(0, available - rowH * lines.length);
+  const blockTop = gridTop + slack / 2;
+
+  const barCeil = ceilingFor(Math.max(0, ...lines.flatMap((r) => r.byVariant.filter((v) => v.n).map((v) => v.rate))));
+  const famCeil = ceilingFor(Math.max(0, ...lines.flatMap((r) => r.byFamily.filter((f) => f.n).map((f) => f.rate))));
+
+  // ---- column headings ----
+  const headBase = blockTop + headerH - 16;
+  // Headings must clear their neighbours, so they are measured against the column, not the column plus its gutter.
+  const headSize = Math.min(...grid.variants.map((v) => fit(v, 32, groupW - 10, true, 13)));
+  if (!single) grid.variants.forEach((v, i) => text(varX + i * groupW + groupW / 2, headBase - 52, v, { size: headSize, weight: 700, fill: COLORS.accent, anchor: 'middle' }));
+
+  // Each family heads its own column with its logo, its name, its hit rate over every word, and its own gap.
+  const famLabel = (f) => `${familyName(f.family)}${f.models.length > 1 ? ` ×${f.models.length}` : ''}`;
+  const famSize = Math.min(...grid.families.map((f) => fit(famLabel(f), 22, famW - 8, true, 12)));
+  grid.families.forEach((f, i) => {
+    const cx = famX + i * famW + famW / 2;
+    const logo = logoFor(f.models[0]);
+    const ls = Math.min(famW - 16, 26);
+    if (logo) parts.push(`<image x="${(cx - ls / 2).toFixed(1)}" y="${(headBase - 94).toFixed(1)}" width="${ls}" height="${ls}" href="${logo}" opacity="0.9"/>`);
+    text(cx, headBase - 52, famLabel(f), { size: famSize, weight: 700, anchor: 'middle' });
+    text(cx, headBase - 22, pct(f.rate), { size: 25, weight: 700, fill: COLORS.accent, anchor: 'middle' });
+  });
+  // ---- rows ----
+  lines.forEach((row, ri) => {
+    const ry = blockTop + headerH + ri * (rowH + rowGap);
+    const mid = ry + rowH / 2;
+    const flagged = row.delta != null && row.delta >= grid.threshold - 1e-9;
+    rect(pad, ry, labelW - 14, rowH, COLORS.panel);
+    if (flagged) rect(pad, ry, 10, rowH, COLORS.accent, { rx: 3 });
+    const caption = row.delta && !single
+      ? `most in ${row.tops.slice(0, 2).join(' and ')}${row.tops.length > 2 ? ` +${row.tops.length - 2}` : ''}`
+      : null;
+    const ls = fit(row.label, clamp(19, rowH * 0.36, 34), labelW - 46, true, 14);
+    text(pad + 22, mid + (caption ? -4 : ls / 3), row.label, { size: ls, weight: 700 });
+    if (caption) text(pad + 22, mid + 24, caption, { size: fit(caption, 18, labelW - 40, false, 12), fill: COLORS.muted });
+
+    // left block: one bar per group, all against one ceiling, each carrying its number
+    const barH = Math.min(rowH - 26, 52);
+    row.byVariant.forEach((v, ci) => {
+      const cx = varX + ci * groupW;
+      const inner = groupW - 12;
+      rect(cx, mid - barH / 2, inner, barH, COLORS.gray, { opacity: 0.45 });
+      const drawn = v.n && v.rate > 0;
+      const len = drawn ? Math.max(4, inner * Math.min(1, v.rate / barCeil)) : 0;
+      if (drawn) {
+        rect(cx, mid - barH / 2, len, barH, COLORS.red);
+        // The bar's end is the reading, and red against its own track is 1.8:1 for a protanope — too close to
+        // read a length off. A light cap puts the datum on a luminance edge, which every kind of color vision keeps.
+        rect(cx + len - CAP_W, mid - barH / 2, CAP_W, barH, CAP, { rx: 2 });
+      }
+      const label = v.n ? pct(v.rate) : '—';
+      const size = fit(label, clamp(19, barH * 0.5, 32), inner - 20, true, 13);
+      const tw = textWidth(label, size, true);
+      if (!drawn) text(cx + 12, mid + size / 3, label, { size, weight: 700, fill: COLORS.muted });
+      else if (len - CAP_W - 16 >= tw) text(cx + len - CAP_W - 9, mid + size / 3, label, { size, weight: 700, fill: '#fff', anchor: 'end' });
+      else if (len + 10 + tw <= inner) text(cx + len + 10, mid + size / 3, label, { size, weight: 700 });
+      else text(cx + len - CAP_W - 9, mid + size / 3, label, { size, weight: 700, fill: '#fff', anchor: 'end' });
+    });
+
+    // right block: the same measure per family, as a number over a rule. Nothing rings the largest cell of a row:
+    // both blocks already descend from the left, so the eye finds the top of a row by reading it, not by hunting
+    // for a marked cell.
+    row.byFamily.forEach((f, ci) => {
+      const cx = famX + ci * famW;
+      const inner = famW - 10;
+      const label = f.n ? pct(f.rate) : '—';
+      const size = fit(label, clamp(18, barH * 0.46, 28), inner - 8, true, 12);
+      text(cx + inner / 2, mid + size / 3 - 6, label, { size, weight: 700, fill: f.rate > 0 ? COLORS.text : COLORS.muted, anchor: 'middle' });
+      const ruleY = mid + barH / 2 - 9;
+      rect(cx + 4, ruleY, inner - 8, 7, COLORS.gray, { rx: 3, opacity: 0.5 });
+      if (f.n && f.rate > 0) rect(cx + 4, ruleY, Math.max(5, (inner - 8) * Math.min(1, f.rate / famCeil)), 7, COLORS.red, { rx: 3 });
+    });
+
+  });
+
+  // ---- footer ----
+  // No key. A red bar with its own percentage printed on it, under a column headed by a group name, is already
+  // the sentence a legend would have spelled out — and the line it took cost the grid fifty pixels of row height.
+  // What stays is what a reader cannot deduce from the drawing: the scales, and where the run came from.
+  const fy = H - 46;
+  const meta = [
+    `wording bars to ${pct(barCeil)}`,
+    `family bars to ${pct(famCeil)}`,
+    // The heading number and the cells under it count different things, so the card says which is which.
+    `family % is its outputs containing any ${grid.rows.length > 1 ? 'of the words' : 'word'}; cells are per word`,
+    hidden ? `${hidden} more word${hidden > 1 ? 's' : ''} with smaller gaps` : null,
+    runsLine(a),
+    `id ${a.id}`,
+  ].filter(Boolean).join(' · ');
+  const urlSize = 26;
+  text(W - pad, fy, shareUrl, { size: urlSize, font: MONO, anchor: 'end' });
+  // The metadata gives way to the share link rather than running under it.
+  text(pad, fy, meta, { size: fit(meta, 20, maxW - textWidth(shareUrl, urlSize, false, true) - 40, false, 10, true), fill: COLORS.muted, font: MONO });
+  parts.push('</svg>');
+  return pinTextWidths(parts.join('\n'));
+}

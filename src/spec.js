@@ -1,7 +1,7 @@
 // Eval spec: normalize, expand variables into variants, canonicalize, ID, build jobs.
 import { shortId } from './id.js';
 
-export const PRIMARY_METRICS = ['refusal', 'keyword', 'sentiment'];
+const PRIMARY_METRICS = ['refusal', 'keyword', 'sentiment'];
 // Reasoning effort sent with every request. 'default' sends nothing: the model thinks as it ships.
 export const REASONING_EFFORTS = ['default', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
 
@@ -22,7 +22,7 @@ export const DEFAULTS = Object.freeze({
   seed: null,
   // analysis / presentation only (not part of the ID). Card wording is fixed on purpose so images are comparable.
   sentiment_analyzer: 'builtin', // builtin | afinn | http(s)://url | ./module.js
-  card_title: 'finding', // finding: the generated sentence is the headline · prompt: the prompt is, viewers judge
+  card_title: null, // null: whatever the default heading is (see defaultCardTitle) · finding: the sentence · prompt: the prompts
   share_base: 'llmscope.dev/e/',
 });
 
@@ -32,8 +32,38 @@ export const CANONICAL_FIELDS = [
   'max_tokens', 'thinking_budget', 'reasoning', 'primary', 'keywords', 'keyword_mode', 'seed',
 ];
 
-const INLINE_RE = /\{([^{}|]*\|[^{}]*)\}/g; // {black|white}
-const VAR_RE = /\{([A-Za-z_][A-Za-z0-9_]*)\}/g; // {race}
+// Every {…} in a prompt is a slot, named in whatever words you think in: {race}, {environmental concern},
+// {2020}, {the "safe" framing}. A bar makes it an inline group that fills itself: {black|white}. Surrounding
+// whitespace is not part of a name, so {race} and { race } are one slot. To send a literal brace, double it:
+// {{ and }} reach the model as { and }.
+const TOKEN_RE = /\{\{|\}\}|\{[^{}]*\}/g;
+
+/**
+ * What one {…} token is: an escaped brace, an inline group, a named slot, or empty braces that name nothing.
+ * @returns {{kind:'escape'|'inline'|'slot'|'empty', text?:string, values?:string[], name?:string}}
+ */
+function braceToken(token) {
+  if (token === '{{' || token === '}}') return { kind: 'escape', text: token[0] };
+  const inner = token.slice(1, -1).trim();
+  if (!inner) return { kind: 'empty' };
+  if (inner.includes('|')) return { kind: 'inline', values: inner.split('|').map((s) => s.trim()) };
+  return { kind: 'slot', name: inner };
+}
+
+/** A brace group the eval fills in. `{{`, `}}` and `{}` are not. */
+export function isSlotToken(token) {
+  const kind = braceToken(token).kind;
+  return kind === 'slot' || kind === 'inline';
+}
+
+/** Brace groups naming nothing — `{}` — which the model would be asked for as written. */
+export function strayBraces(prompts) {
+  const stray = new Set();
+  for (const p of [].concat(prompts || [])) {
+    for (const m of String(p).matchAll(TOKEN_RE)) if (braceToken(m[0]).kind === 'empty') stray.add(m[0]);
+  }
+  return [...stray];
+}
 
 function asList(v) {
   if (Array.isArray(v)) return v.map((s) => String(s).trim());
@@ -48,16 +78,19 @@ function asList(v) {
 export function liftInlineVariants(prompts, variables) {
   const vars = { ...variables };
   const seen = new Map(); // "black|white" -> name
-  let counter = Object.keys(vars).filter((k) => /^v\d+$/.test(k)).length;
+  const taken = new Set(Object.keys(vars)); // never reuse a name a slot already answers to
+  let counter = 0;
   const out = prompts.map((p) =>
-    p.replace(INLINE_RE, (_, body) => {
-      const key = body.split('|').map((s) => s.trim()).join('|');
+    p.replace(TOKEN_RE, (tok) => {
+      const t = braceToken(tok);
+      if (t.kind !== 'inline') return tok; // an escaped brace or a named slot is left exactly as written
+      const key = t.values.join('|');
       let name = seen.get(key);
       if (!name) {
-        counter += 1;
-        name = `v${counter}`;
+        do { counter += 1; name = `v${counter}`; } while (taken.has(name));
+        taken.add(name);
         seen.set(key, name);
-        vars[name] = key.split('|');
+        vars[name] = [...t.values];
       }
       return `{${name}}`;
     }),
@@ -88,17 +121,37 @@ export function normalizeSpec(input = {}) {
   spec.keyword_mode = spec.keyword_mode === 'all' ? 'all' : 'any';
   spec.system = String(spec.system || '');
   if (spec.seed === '' || spec.seed === undefined) spec.seed = null;
-  spec.card_title = spec.card_title === 'prompt' ? 'prompt' : 'finding';
+  // Left null unless the eval names one, rather than stamped with today's default: a saved eval that froze the
+  // default would keep showing an old heading after the default moved, and nobody chose that heading. Readers of
+  // this field resolve null through defaultCardTitle.
+  spec.card_title = CARD_TITLES.includes(spec.card_title) ? spec.card_title : null;
   if (spec.disparity_threshold === '' || spec.disparity_threshold === undefined) spec.disparity_threshold = null;
   if (spec.disparity_threshold !== null) spec.disparity_threshold = Number(spec.disparity_threshold);
   return spec;
 }
 
+const CARD_TITLES = ['finding', 'prompt'];
+
+/**
+ * Which heading a card leads with when the eval does not say: the prompt, whatever was measured. A reader who has
+ * not been shown the question cannot judge whether the numbers under it mean anything, and the ask is the part a
+ * reader who came for the data wants first. Leading with it states no conclusion and leaves the grid to say what
+ * came back. The generated sentence is one flag away — `--title finding`, or the Finding button over the preview —
+ * for when the result rather than the ask is the point of the image.
+ *
+ * The metric is still taken, so a future card can lead with its own default without changing every caller.
+ *
+ * Presentation only: `card_title` is not a canonical field, so this never moves an eval's id.
+ */
+export const defaultCardTitle = (primary) => 'prompt';
+
 export function validateSpec(spec) {
   const problems = [];
   if (!spec.prompts.length) problems.push('Add at least one prompt.');
   if (!spec.models.length) problems.push('Add at least one model.');
-  if (spec.primary === 'keyword' && !spec.keywords.length) problems.push('Keyword metric needs at least one keyword.');
+  // A keyword eval with no words is the exploratory case: collect the replies first, read them, then decide which
+  // words are worth marking. Scoring nothing is a real answer to "I do not know yet what I am looking for", so it
+  // is allowed — the empty run says so on its own card rather than being refused up front.
   const used = usedVariables(spec.prompts);
   for (const name of used) if (!spec.variables[name]) problems.push(`Variable {${name}} is used but has no values.`);
   for (const name of Object.keys(spec.variables)) if (!used.has(name)) problems.push(`Variable {${name}} is defined but not used in any prompt.`);
@@ -107,7 +160,12 @@ export function validateSpec(spec) {
 
 export function usedVariables(prompts) {
   const used = new Set();
-  for (const p of prompts) for (const m of p.matchAll(VAR_RE)) used.add(m[1]);
+  for (const p of prompts) {
+    for (const m of String(p).matchAll(TOKEN_RE)) {
+      const t = braceToken(m[0]);
+      if (t.kind === 'slot') used.add(t.name);
+    }
+  }
   return used;
 }
 
@@ -135,13 +193,17 @@ export function comboLabel(combo) {
 
 export function fillTemplate(template, combo) {
   return template
-    .replace(VAR_RE, (m, name) => (name in combo ? combo[name] : m))
+    .replace(TOKEN_RE, (tok) => {
+      const t = braceToken(tok);
+      if (t.kind === 'escape') return t.text; // {{ and }} were how the prompt asked for a literal brace
+      return t.kind === 'slot' && t.name in combo ? combo[t.name] : tok;
+    })
     .replace(/[ \t]{2,}/g, ' ')
     .replace(/ ([,.;:!?])/g, '$1')
     .trim();
 }
 
-export function stableStringify(value) {
+function stableStringify(value) {
   if (Array.isArray(value)) return '[' + value.map(stableStringify).join(',') + ']';
   if (value && typeof value === 'object') {
     return '{' + Object.keys(value).sort().map((k) => JSON.stringify(k) + ':' + stableStringify(value[k])).join(',') + '}';
@@ -181,5 +243,10 @@ export function buildJobs(spec) {
 
 /** Human-readable template with the variable slot expanded, for the card title. */
 export function displayTemplate(template, variables) {
-  return template.replace(VAR_RE, (m, name) => (variables[name] ? `{${variables[name].map((v) => (v === '' ? '(none)' : v)).join(' | ')}}` : m));
+  return template.replace(TOKEN_RE, (tok) => {
+    const t = braceToken(tok);
+    if (t.kind === 'escape') return t.text;
+    if (t.kind !== 'slot' || !variables[t.name]) return tok;
+    return `{${variables[t.name].map((v) => (v === '' ? '(none)' : v)).join(' | ')}}`;
+  });
 }

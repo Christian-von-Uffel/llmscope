@@ -9,7 +9,7 @@ await ensureText();
 
 const models = ['openai/gpt-5.2', 'google/gemini-3-pro', 'mistralai/mistral-large-3', 'meta-llama/llama-4-70b-instruct', 'anthropic/claude-opus-4.5', 'qwen/qwen3-72b-instruct'];
 const filler = (n) => Array.from({ length: n }, (_, i) => `context sentence number ${i + 1} that adds detail to the scene.`).join(' ');
-const titleSizes = (svg) => [...svg.matchAll(/<text x="56" y="[\d.]+" font-family="[^"]+" font-size="(\d+)" font-weight="700" fill="#f3f4f6">/g)].map((m) => Number(m[1]));
+const titleSizes = (svg) => [...svg.matchAll(/<text x="56" y="[\d.]+" font-family="[^"]+" font-size="(\d+)" font-weight="700" fill="#f3f4f6"[^>]*>/g)].map((m) => Number(m[1]));
 
 async function card(prompt) {
   const run = await runEval({ prompts: [prompt], variables: { race: ['black', 'white'] }, models }, { provider: createMockProvider() });
@@ -102,8 +102,8 @@ test('a variable slot that wraps across two title lines stays highlighted on bot
   const run = await runEval({ prompts: ['Summarize the {party} Party position on immigration in two sentences.'], variables: { party: ['Democratic', 'Republican', 'Libertarian', 'Green'] }, models: models.slice(0, 3) }, { provider: createMockProvider() });
   const svg = renderCard(analyze(run));
   const title = svg.slice(0, svg.indexOf('<rect x="56"'));
-  const accents = title.match(/<tspan fill="#ffd166">[^<]*<\/tspan>/g) || [];
+  const accents = title.match(/fill="#ffd166"[^>]*>[^<]*</g) || [];
   assert.ok(accents.length >= 2, `expected the slot on two lines, got ${accents.length}`);
   assert.ok(accents.some((t) => t.includes('{Democratic')) && accents.some((t) => t.includes('Green}')));
-  assert.ok(!title.includes('<tspan fill="#ffd166"> Party'), 'text after the slot is not highlighted');
+  assert.ok(!accents.some((t) => /Party/.test(t)), 'text after the slot is not highlighted');
 });

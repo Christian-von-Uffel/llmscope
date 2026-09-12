@@ -23,6 +23,5 @@
   "disparity_threshold": null,
   "seed": null,
   "sentiment_analyzer": "builtin",
-  "card_title": "finding",
   "share_base": "llmscope.dev/e/"
 }

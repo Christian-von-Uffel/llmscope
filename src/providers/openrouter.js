@@ -1,7 +1,13 @@
 // OpenRouter chat-completions provider. Bring your own key; works in Node and browsers (OpenRouter allows CORS).
 import { fetchModels, billsThinkingSeparately } from '../models.js';
 
-export const OPENROUTER_URL = 'https://openrouter.ai/api/v1';
+const OPENROUTER_URL = 'https://openrouter.ai/api/v1';
+
+/** A key as it is safe to show: enough of the head to recognise, the tail to tell two apart, never the middle. */
+export function maskKey(key) {
+  if (!key) return '';
+  return key.length > 14 ? `${key.slice(0, 10)}…${key.slice(-4)}` : '••••';
+}
 
 export function estimateTokens(text) {
   return Math.ceil((text || '').length / 4);
