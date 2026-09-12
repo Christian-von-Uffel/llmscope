@@ -4,7 +4,7 @@
 // step, and the directories it writes are generated. It runs before every build and every dev server.
 //
 //   /fonts/*.ttf          the three DejaVu faces the cards are measured with, from node_modules
-//   /samples/*.svg        the landing page's three example images, from assets/samples/
+//   /samples/*.svg        the landing page's four example images, from assets/samples/
 //   /evals/<id>.json      the bundled evals, so a share link naming one resolves on the deployed site
 //   /og.png               the social card, committed alongside the samples it is drawn from
 //

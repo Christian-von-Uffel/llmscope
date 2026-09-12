@@ -295,6 +295,48 @@ test('the prompts never squeeze the rows below reading height', () => {
   assert.match(svg, /\+ 1 more prompt sharing \{race\}/);
 });
 
+test('every wording heads its own column: a long one wraps or shrinks, and never runs under its neighbours', async () => {
+  // The wording headings share the accent, the weight and the anchor with the family hit rates, which are the
+  // percentages. The prompt's slot shares the accent but is not anchored.
+  const headings = (svg) => [...svg.matchAll(/<text x="([\d.]+)" y="([\d.]+)" text-anchor="middle" font-family="[^"]+" font-size="([\d.]+)" font-weight="700" fill="#ffd166"[^>]*>([^<]+)<\/text>/g)]
+    .map((m) => ({ x: Number(m[1]), y: Number(m[2]), size: Number(m[3]), text: m[4] }));
+  const check = (run, terms) => {
+    const svg = renderKeywordCard(run, analyze(run), terms);
+    const all = headings(svg);
+    const heads = all.filter((t) => !/^\d+%$/.test(t.text));
+    const famX = [...new Set(all.filter((t) => /^\d+%$/.test(t.text)).map((t) => t.x))].sort((a, b) => a - b);
+    const { variants } = keywordGrid(run, terms, { familyOf: modelFamily });
+    // A heading is centred on its column, so the columns are where the headings are and their pitch is the width.
+    const cols = [...new Set(heads.map((t) => t.x))].sort((a, b) => a - b);
+    assert.equal(cols.length, variants.length, 'one column per wording');
+    const groupW = cols[1] - cols[0];
+    assert.equal(new Set(heads.map((t) => t.size)).size, 1, 'one size across the headings, so no wording looks like the one that mattered');
+    for (const t of heads) {
+      const w = textWidth(t.text, t.size, true);
+      assert.ok(w <= groupW - 10 + 0.2, `“${t.text}” at ${t.size}px is ${w.toFixed(0)}px wide in a ${groupW.toFixed(0)}px column`);
+    }
+    // Nothing is cut and no word is broken: the lines of a column, read down, are its wording.
+    variants.forEach((v, i) => assert.equal(heads.filter((t) => t.x === cols[i]).sort((a, b) => a.y - b.y).map((t) => t.text).join(' '), v));
+    return { size: heads[0].size, lines: heads.length, groupW, famW: famX[1] - famX[0] };
+  };
+  // The run that showed the fault: four wordings, two of them phrases, over eight families. The families leave
+  // the wording columns almost nothing to grow into, so the phrases take a second line rather than a size nobody
+  // can read — and they used to be drawn at that size anyway, each running under the next.
+  const wordings = ['vaccination', 'childhood vaccination', 'heavy metals', 'encephalitis'];
+  const eight = [...base.models, 'x-ai/grok-4.6', 'meta-llama/llama-4-maverick', 'mistralai/mistral-medium-3-5', 'deepseek/deepseek-v4-pro-0813', 'qwen/qwen3.8-max-0902'];
+  const crowded = await runEval({ ...base, prompts: ['What is the relationship between {v1} and autism?'], variables: { v1: wordings }, models: eight, runs: 1, keywords: ['myth', 'misinformation'] }, { provider, concurrency: 8 });
+  const tight = check(crowded, ['myth', 'misinformation']);
+  assert.ok(tight.lines > wordings.length, 'a phrase took a second line');
+  assert.ok(tight.famW >= 88 - 0.2, `the families gave width down to their floor and no further: ${tight.famW.toFixed(1)}px`);
+  // Three families and a wording no break between words can shorten: its column takes width the family block can
+  // spare, and the heading stays at the size a family name is set at, on one line.
+  const roomy = await runEval({ ...base, prompts: ['Is {drug} safe to take?'], variables: { drug: ['hydroxychloroquine', 'ivermectin'] } }, { provider, concurrency: 4 });
+  const wide = check(roomy, base.keywords);
+  assert.equal(wide.lines, 2, 'one line each');
+  assert.ok(wide.size >= 20, `at a family name's size: ${wide.size}px`);
+  assert.ok(wide.groupW > 100, `in a column that grew for it: ${wide.groupW.toFixed(0)}px`);
+});
+
 test('too many words are trimmed to the rows that fit, and the rest are counted off', () => {
   const many = Array.from({ length: MAX_ROWS + 4 }, (_, i) => `w${i}`);
   const svg = renderKeywordCard(run, analyze(run), many);

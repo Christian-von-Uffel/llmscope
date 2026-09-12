@@ -72,7 +72,8 @@ The page opens on a landing page, asks for the key once, and then shows the form
 fields a run actually decides — prompt, slot values, measure, models, repeats — and takes `src/spec.js` defaults
 for the rest, so the reply cap, thinking budget, reasoning effort, disparity threshold, seed, system prompt and
 sentiment service are CLI-side settings; a results file loaded into the page keeps whatever it was run with.
-Runs are saved in that browser and reopen from the picker over the card.
+Runs are saved in that browser and reopen from the picker in the header; *Open…* beside it takes an eval ID
+from a card, a share link, or a results file from disk.
 
 Two dependencies are optional. Without `@resvg/resvg-js` you get SVG cards instead of PNG, and without
 `sentiment` the sentiment check is unavailable; everything else works. `@napi-rs/canvas` is required but ships
@@ -255,9 +256,12 @@ being matched, and the models asked — because the headline verdicts read alike
 refused") across runs that were asking quite different questions. Past eight saved runs, the menu's *Browse
 past results* picker filters as you type over those same fields.
 
-In the browser, the response table sits under the card, "Save results" downloads the same JSON, and
-"Load results…" opens a saved file. The prompt box is editable after a load, so a saved eval can be reworded in
-place, and the slots under it re-derive as you type. Its model box searches the whole catalogue, not just the
+In the browser, the response table sits under the card, "Save results" downloads the same JSON, "Share link"
+copies a link that opens the eval set up the same way, and *Open…* in the header loads a saved results file. Every
+download is named for the run on show, the way the files in `out/` are, so two runs of one eval never save over
+each other, and an image downloaded after the form was edited is still named for the run it draws. The
+prompt box is editable after a load, so a saved eval can be reworded in place, and the slots under it re-derive
+as you type. Its model box searches the whole catalogue, not just the
 pre-selected flagships — type `gemini` and *Select all 15* to run the family, or add one by name in the field
 below the list.
 
@@ -313,8 +317,10 @@ ends in `…`. That is the same behaviour as before the measure rule — the rul
 slack, and there it makes the heading shorter, not taller.
 
 **Responses image.** Every run writes it next to the card (`llmscope sheet <id>` re-makes it; the browser has a
-Card / Keywords / Responses toggle over the preview). It puts every reply of a run on one 4096 × 4096 image, under the same
-header as the card, so the two images together show a viewer everything.
+Card / Keywords / Sentences / Responses toggle over the preview, and under Responses the same *how much of each
+reply* choices, the ends of every reply downloading as `.ends` the way the CLI names them). It puts every reply
+of a run on one 4096 × 4096 image, under the same header as the card, so the two images together show a viewer
+everything.
 It never paginates and never trims: the text size clamps, up or down, to the largest at which everything fits,
 and the column count follows from that size rather than from the image width. A column has to earn its place —
 it is only split once each one still holds about **twelve words** of ordinary prose, measured against the real
@@ -457,10 +463,10 @@ responses image…* menu all follow the edit rather than reverting to the eval's
 you like; `--highlight reset` forgets the edit and hands the job back to the eval's own keywords. The menu after
 a run (and *Browse past results* for an older one) offers **Edit the highlighted words…**, prefilled with what
 the run marks now, so adding or dropping one is an edit rather than a retype. In the browser, the box beside the
-Keywords and Responses tabs does the same — it is one setting, so it marks the replies and counts the keyword
-card's rows at once — and the search box under the card is how those words get there: find them in the output,
-then *Add to highlights*. The edit travels: *Save results* writes it into the JSON, so `llmscope sheet` on that
-file marks the same words.
+Keywords, Sentences and Responses tabs does the same — it is one setting, so it marks the replies, counts the
+keyword card's rows and gathers the sentences page at once — and the search box under the card is how those
+words get there: find them in the output, then *Add to highlights*. The edit travels: *Save results* writes it
+into the JSON, so `llmscope sheet` on that file marks the same words.
 
 **Why a block and not a color.** The mark is a light block with dark text on it, which is a *luminance* cue, and
 luminance is the one thing every kind of color vision keeps. Marked text stays at 12.2:1 or better against its
@@ -623,6 +629,7 @@ the edit sticks, so the sheet, the printout, the table and this card all go on c
 
 **The sentences image.** `llmscope sentences <id>` counts how many times the marked words actually matched, under
 the variable the eval swapped, and shows each match in the sentence it turned up in. The count is the finding.
+In the browser it is the **Sentences** tab over the preview, drawn the way the command draws it by default.
 The sentences are the context around it: *suspicious* appearing in 40% of one group's replies and 12% of another's
 is a number about a word, and the same word is an accusation in one sentence and a quotation in the next.
 
@@ -784,6 +791,7 @@ src/render.js        SVG card
 src/sheet.js         responses sheet (every reply on one image)
 src/palette.js       per-model OKLCH colors (detail)
 src/render-share.js  share card: every prompt as headline (default) or the finding, one number per cell
+src/images.js        the images a run is drawn as: one list the CLI writes from, the browser offers, the samples draw through
 src/logos.js         provider marks, generated by scripts/build-logos.mjs from @lobehub/icons-static-svg
 assets/logos/        the white monochrome marks, keyed by OpenRouter provider prefix
 src/models.js        live OpenRouter catalogue, frontier defaults per provider, cost estimate
@@ -798,7 +806,8 @@ bin/llmscope.js      interactive menu + wizard, one-line flags, static server
 site/src/pages/      the website: landing page, key prompt and app in one Astro page
 web/app.js style.css  that page's code and dress, built by Astro into one bundle, run by the CLI unbuilt
 web/store.js         everything that browser remembers — key and preferences local, runs behind an async API
-assets/samples/      the three landing-page images, rebuilt by scripts/build-samples.mjs from runs in out/
+assets/samples/      the landing-page images and the runs they are drawn from; scripts/build-samples.mjs redraws
+                     them, and test/samples.test.js fails the moment a renderer change leaves one behind
 site/public/         what the site serves as plain files, gathered by scripts/build-site-assets.mjs
 astro.config.mjs     the build: where the site's sources are, and the Node-only imports the browser stubs out
 ```
@@ -808,6 +817,13 @@ astro.config.mjs     the build: where the site's sources are, and the Node-only 
 The site is a static Astro build: `npm run build` gathers the fonts, sample images and bundled evals into
 `site/public/`, then writes the whole site to `dist/`. There is no server behind it and no build-time secret —
 the key still travels only from the reader's browser to OpenRouter.
+
+**What keeps the site and the CLI in step.** The engine in `src/` is one implementation, imported by both.
+`src/images.js` is the one list of images a run is drawn as — kind, filename suffix, size, when a run writes it,
+its browser tab, and how it is drawn — and the CLI writes from it, the browser builds its tabs and names its
+downloads from it, and the landing page's samples are drawn through it, so adding an image is adding a row
+there. The samples themselves are committed beside the runs they come from, and `test/samples.test.js` redraws
+them and fails when one no longer matches, which is how a renderer change cannot quietly age the landing page.
 
 On Vercel it needs no configuration beyond the repository: Astro is detected, `npm run build` is the build
 command and `dist` is the output. `vercel.json` carries the two things the host has to know — that `/e/<id>` is

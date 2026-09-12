@@ -111,7 +111,8 @@ button:disabled, .btn:disabled { opacity: .42; cursor: not-allowed; }
 }
 .feature .example b { color: var(--text); background: var(--mark); border-radius: 3px; padding: 0 3px; font-weight: 700; }
 
-.shots { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; }
+/* Two by two: the two cards over the two sheets, each wide enough for a sheet's text to be read at all. */
+.shots { display: grid; grid-template-columns: repeat(2, 1fr); gap: 22px; }
 .shots figure { margin: 0; }
 .shots a { display: block; background: #0f1113; border: 1px solid var(--line-strong); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
 .shots img { display: block; width: 100%; aspect-ratio: 1; object-fit: contain; }
@@ -147,10 +148,8 @@ button:disabled, .btn:disabled { opacity: .42; cursor: not-allowed; }
 .idblock p { margin: 0 0 10px; font-size: 13.5px; color: var(--muted); }
 .idrow { display: flex; gap: 8px; align-items: flex-end; }
 .idrow input { margin: 0; flex: 1; min-width: 0; }
-.idrow.labelled { align-items: flex-end; padding-bottom: 16px; border-bottom: 1px solid var(--line); margin-bottom: 4px; }
 .idrow.labelled .field { flex: 1; min-width: 0; }
 .id-error { margin: 8px 0 0; }
-.idrow.labelled + .id-error { margin: -8px 0 12px; }
 
 /* ======================================================================
    AN EVAL, RESOLVED
@@ -209,6 +208,19 @@ button:disabled, .btn:disabled { opacity: .42; cursor: not-allowed; }
 .badge { font-size: 13px; color: var(--muted); }
 .badge .ok { color: var(--green); font-weight: 700; }
 
+/* The Open… menu: a plain disclosure dressed as a button, its panel dropped under the header. */
+.opener { position: relative; }
+.opener > summary { margin: 0; list-style: none; }
+.opener > summary::-webkit-details-marker { display: none; }
+.opener[open] > summary { background: rgba(21, 23, 28, .05); }
+.opener-menu {
+  position: absolute; right: 0; top: calc(100% + 8px); width: min(360px, calc(100vw - 32px)); z-index: 30;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px; box-shadow: var(--shadow);
+  display: grid; gap: 10px; text-align: left; white-space: normal;
+}
+.opener-alt { border-top: 1px solid var(--line); padding-top: 12px; }
+.opener-alt .filebtn { width: 100%; }
+
 .app-layout { display: grid; grid-template-columns: 430px minmax(0, 1fr); gap: 20px; padding: 20px 22px 60px; align-items: start; }
 @media (max-width: 1080px) { .app-layout { grid-template-columns: 1fr; } }
 /* Before a run there is nothing on the right to look at, so the form has the page to itself rather than sitting
@@ -227,7 +239,8 @@ html:not([data-has-results]) .app-layout { grid-template-columns: minmax(0, 620p
 .origin-actions { margin-top: 10px; }
 
 .step { padding: 18px 0; border-top: 1px solid var(--line); }
-.step:first-child { border-top: 0; padding-top: 2px; }
+/* No rule over the first step — nor over the one after the origin strip while that strip is hidden. */
+.step:first-child, .origin[hidden] + .step { border-top: 0; padding-top: 2px; }
 /* A step below the first unanswered one recedes: still readable, still reachable, just not competing for the
    attention of someone who has not got there yet. Touching it in any way brings it straight back. */
 .step.pending { opacity: .45; transition: opacity .18s ease; }
@@ -295,11 +308,8 @@ input[type=checkbox], input[type=radio] { width: auto; display: inline-block; ma
 .estimate b { color: var(--text); }
 .estimate .bad { color: var(--red); }
 .problems { background: #fdf0ee; border: 1px solid #f0c2ba; color: #8a1c1c; border-radius: 9px; padding: 11px 13px; margin-bottom: 12px; white-space: pre-line; font-size: 13.5px; }
-.actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 4px 0 14px; }
+.actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 4px 0 0; }
 .filebtn { font-size: 13px; padding: 7px 11px; }
-.idbox { color: var(--muted); display: grid; gap: 8px; font-size: 13px; }
-.idbox code { color: var(--text); font-size: 15px; font-weight: 700; letter-spacing: .02em; }
-.idbox input { font-size: 12px; }
 
 /* ---------- results ---------- */
 .toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
@@ -327,6 +337,8 @@ input[type=checkbox], input[type=radio] { width: auto; display: inline-block; ma
 .empty { color: var(--muted); padding: 26px; font-size: 14.5px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; }
 .empty p { margin: 0 0 10px; }
 .empty b { color: var(--text); }
+/* Inside the dark frame it is the one light thing there, and says why there is no picture. */
+.card .empty { margin: 24px; max-width: 46ch; }
 .responses { margin-top: 18px; }
 summary { cursor: pointer; font-weight: 700; font-size: 14px; margin-bottom: 10px; }
 summary .hint { font-weight: 400; }

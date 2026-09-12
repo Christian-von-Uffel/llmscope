@@ -39,7 +39,7 @@ const ogImage = new URL('/og.png', Astro.site).href;
 <meta property="og:image" content={ogImage}>
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="1200">
-<meta property="og:image:alt" content="An llmscope results card: eight language models scored for how often each refused, split by the identity swapped into one prompt.">
+<meta property="og:image:alt" content="An llmscope results card: three language models scored for how often each refused, split by the identity swapped into one prompt.">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content={title}>
 <meta name="twitter:description" content={description}>
@@ -153,8 +153,8 @@ try {
   </section>
 
   <section class="band alt" id="output">
-    <h2 class="band-title">Every run produces three images</h2>
-    <p class="band-lede">Real output from real runs. Download any of them as SVG or PNG and post it as it stands — the wording is fixed so two cards can always be read against each other.</p>
+    <h2 class="band-title">Four images from one run</h2>
+    <p class="band-lede">Real output from real runs. Every run writes the card and two sheets of the replies themselves; a run that marks words writes the keyword grid too. Download any of them as SVG or PNG and post it as it stands — the wording is fixed so two cards can always be read against each other.</p>
     <div class="shots">
       <figure>
         <a href="/samples/card.svg" target="_blank" rel="noopener"><img src="/samples/card.svg" alt="A results card: three models by five wordings of the same prompt, each cell shaded by how often the model refused."></a>
@@ -167,6 +167,10 @@ try {
       <figure>
         <a href="/samples/responses.svg" target="_blank" rel="noopener"><img src="/samples/responses.svg" alt="A responses sheet: every matching reply in full, each in its model's colour, with the matched keywords marked."></a>
         <figcaption><b>The responses.</b> Every reply behind the numbers, in the model's colour, with your marked words highlighted.</figcaption>
+      </figure>
+      <figure>
+        <a href="/samples/ends.svg" target="_blank" rel="noopener"><img src="/samples/ends.svg" alt="A first-and-last-sentences sheet: how each of eight models opened its reply and where it landed, side by side, refusals marked with a red cross."></a>
+        <figcaption><b>The ends.</b> The first and last sentence of every reply, so how each model opens and where it lands reads side by side.</figcaption>
       </figure>
     </div>
   </section>
@@ -252,6 +256,23 @@ try {
     <a class="brand" href="#top" data-go="landing"><svg class="scope"><use href="#ico-scope"/></svg><span>llmscope</span></a>
     <div class="head-right">
       <select id="recent-runs" class="small" title="reopen a run you have already done" hidden></select>
+      <!-- Everything that opens something already made lives here, in one quiet control, so the form below is
+           only ever about making a new one and ends where a form should: at Run. -->
+      <details class="opener">
+        <summary class="btn ghost small" title="open an eval ID from a card or a post, or a results file from disk">Open…</summary>
+        <div class="opener-menu">
+          <form class="idrow labelled" data-open-id>
+            <label class="field flush">Eval ID or share link <span class="hint">from a card or a post</span>
+              <input type="text" autocomplete="off" spellcheck="false" placeholder="D5a3G9 or a share link" aria-label="Eval ID or share link">
+            </label>
+            <button class="btn small" type="submit">Open</button>
+          </form>
+          <div class="id-error hint warn" hidden></div>
+          <div class="opener-alt">
+            <label class="filebtn" title="a .results.json saved by Save results, or written by the llmscope command line"><input id="load-results" type="file" accept=".json" hidden>Open a results file…</label>
+          </div>
+        </div>
+      </details>
       <span id="key-badge" class="badge"></span>
       <button id="btn-change-key" class="btn ghost small">Change key</button>
     </div>
@@ -260,13 +281,6 @@ try {
   <main class="app-layout">
     <section class="panel form">
       <div id="origin" class="origin" hidden></div>
-      <form id="eval-id-row" class="idrow labelled" data-open-id>
-        <label class="field flush">Open an eval ID <span class="hint">from a card or a post</span>
-          <input type="text" autocomplete="off" spellcheck="false" placeholder="D5a3G9 or a share link" aria-label="Eval ID or share link">
-        </label>
-        <button class="btn small" type="submit">Open</button>
-      </form>
-      <div class="id-error hint warn" hidden></div>
 
       <div class="step" data-step="1">
         <h2><span class="n">1</span> Prompt</h2>
@@ -322,14 +336,8 @@ try {
         <div id="estimate" class="estimate">—</div>
         <div id="problems" class="problems" hidden></div>
         <div class="actions">
-          <button id="btn-run" class="btn dark">Run eval</button>
-          <button id="btn-mock" class="btn ghost">Preview with sample data</button>
-          <button id="btn-stop" class="btn danger" hidden>Stop</button>
-          <label class="filebtn" title="open a .results.json saved by Save results, or written by the llmscope command line"><input id="load-results" type="file" accept=".json" hidden>Open a results file…</label>
-        </div>
-        <div class="idbox">
-          <div>Eval ID <code id="spec-id">——————</code></div>
-          <div class="linerow"><input id="share-link" readonly aria-label="Link that reopens this eval setup"><button id="btn-copy" class="btn ghost small">Copy link</button></div>
+          <button id="btn-run" class="btn dark lg">Run eval</button>
+          <button id="btn-stop" class="btn danger lg" hidden>Stop</button>
         </div>
       </div>
     </section>
@@ -340,11 +348,9 @@ try {
       </div>
 
       <div class="viewbar">
-        <div class="seg" id="tabs">
-          <button id="tab-card" class="on" disabled>Card</button>
-          <button id="tab-keywords" disabled title="which words landed on which group — needs words to mark">Keywords</button>
-          <button id="tab-sheet" disabled>Responses</button>
-        </div>
+        <!-- One tab per image in src/images.js, filled in by web/app.js: the images the CLI writes are the images
+             the page offers, and a new one there is a new tab here without this file changing. -->
+        <div class="seg" id="tabs"></div>
         <div class="seg" id="card-view" title="what goes on top of the card">
           <button data-view="prompt" class="on">Prompt</button>
           <button data-view="finding">Finding</button>
@@ -354,6 +360,7 @@ try {
         <button id="btn-svg" class="btn ghost small" disabled title="download the image shown as SVG">SVG</button>
         <button id="btn-png" class="btn ghost small" disabled title="download the image shown as PNG">PNG</button>
         <button id="btn-json" class="btn ghost small" disabled title="download every response with its verdict">Save results</button>
+        <button id="btn-share" class="btn ghost small" disabled title="copy a link that opens this eval set up exactly like this, for someone else to run">Share link</button>
       </div>
 
       <!-- Marked words and the button that redraws the images with them. Typing here changes the table straight

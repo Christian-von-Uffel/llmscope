@@ -4,11 +4,10 @@
 // than three, so the app is already parsed and its model list already loading while someone is still reading the
 // hero. A returning reader with a saved key never sees the first two at all.
 import { planRun, runEval, rescoreRun } from '../src/engine.js';
-import { analyze, totalTokens, outcomeOf, replyBody } from '../src/analyze.js';
-import { renderShareCard } from '../src/render-share.js';
-import { renderResponseSheet, EXCERPTS } from '../src/sheet.js';
+import { totalTokens, outcomeOf, replyBody } from '../src/analyze.js';
+import { EXCERPTS } from '../src/sheet.js';
+import { IMAGES, imageOf, sheetKind, drawImage, markedWords } from '../src/images.js';
 import { RESPONSE_FILTERS, filterResponses, parseSearch, shownText, markSpans, toCsv, toJson } from '../src/responses.js';
-import { renderKeywordCard } from '../src/render-keywords.js';
 import { isValidKeyword, splitTerms, mergeTerms, countKeywords, cleanTerms, batchKey } from '../src/checks/keywords.js';
 import { logoBody, providerOf } from '../src/logos.js';
 import { ensureText, FONT_FILES } from '../src/text.js';
@@ -28,17 +27,22 @@ const primary = () => document.querySelector('input[name=primary]:checked').valu
 let currentRun = null;
 let lastPainted = null; // the run (partial while streaming) the card currently shows
 let paintedId = null; // which run the marked words below belong to
-let currentSvg = '';
-let sheetSvg = '';
-let sheetKey = '';
-let keywordSvg = '';
-let keywordKey = '';
-let view = 'card'; // card | keywords | sheet
+// Every image drawn for the run on show, by kind, with the options it was drawn under: a 4096px sheet is the
+// expensive part of switching tabs, so each is kept until the run, the words or its own options change.
+const drawn = new Map();
+let view = 'card'; // the image on show: a kind from IMAGES
 let abort = null;
 let modelList = [];
 let frontier = FRONTIER_DEFAULTS.slice();
 const checked = new Set(frontier);
 const varValues = {}; // remembered per slot name across re-renders
+// What the form currently describes: the eval's content-addressed id, and the link that carries its whole spec.
+// The link is what Share link copies. Downloads are not named after this id but after the run on show: a run's
+// files carry the run's own id, as they do in out/, so two runs of one eval never download to the same name and
+// a card downloaded after the form was edited is still named for the run it draws.
+let planId = '';
+let shareLink = '';
+const shownId = () => currentRun?.id || planId;
 
 // Two sets of marked words, and the gap between them is the feature. `marked` is what the images were drawn
 // with; `pending` is what the box says right now. Typing changes the table immediately, because finding the
@@ -144,13 +148,23 @@ async function openEvalRef(ref, errorBox) {
   return true;
 }
 
+// The header's Open… menu. Focus lands in the id box when it opens; it closes once something has been opened,
+// on Escape, or on a click anywhere else, so it never has to be put away by hand.
+const opener = document.querySelector('details.opener');
+const closeOpener = () => { if (opener) opener.open = false; };
+if (opener) {
+  opener.addEventListener('toggle', () => { if (opener.open) opener.querySelector('input[type=text]').focus(); });
+  document.addEventListener('click', (e) => { if (opener.open && !opener.contains(e.target)) closeOpener(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeOpener(); });
+}
+
 for (const form of document.querySelectorAll('form[data-open-id]')) {
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const input = form.querySelector('input');
     const box = form.parentElement.querySelector('.id-error') || form.nextElementSibling;
     const ok = await openEvalRef(parseEvalRef(input.value), box?.classList.contains('id-error') ? box : null);
-    if (ok) input.value = '';
+    if (ok) { input.value = ''; closeOpener(); }
   });
 }
 
@@ -202,7 +216,7 @@ async function showResolved(found) {
   const card = $('resolved-card');
   card.hidden = !run;
   document.querySelector('.resolved-grid').classList.toggle('no-card', !run);
-  if (run) { await textReady; card.innerHTML = renderShareCard(analyze(run), { names: Object.fromEntries(modelList.map((m) => [m.id, m.name])), date: run.finished_at }); }
+  if (run) { await textReady; card.innerHTML = drawImage('card', run, { names: Object.fromEntries(modelList.map((m) => [m.id, m.name])), date: run.finished_at }).svg; }
   setStage('resolved');
 }
 
@@ -477,9 +491,7 @@ function describeChanges(before, after) {
 /** The strip over the form: which published eval this started from, and whether it is still that eval. */
 function syncOrigin(plan) {
   const box = $('origin');
-  const row = $('eval-id-row');
   box.hidden = !openedFrom;
-  row.hidden = Boolean(openedFrom);
   if (!openedFrom) return;
   const changes = describeChanges(openedFrom.spec, plan.spec);
   const head = changes.length
@@ -517,8 +529,8 @@ function syncStepFocus(plan) {
 async function refresh() {
   const spec = readSpec();
   const plan = await planRun(spec);
-  $('spec-id').textContent = plan.id;
-  $('share-link').value = `${location.origin}${location.pathname}#spec=${b64.enc(spec)}`;
+  planId = plan.id;
+  shareLink = `${location.origin}${location.pathname}#spec=${b64.enc(spec)}`;
   problem(plan.problems.join('\n'));
   const variants = Object.values(plan.spec.variables).reduce((a, v) => a * v.length, 1);
   const n = (x, one, many = one + 's') => `${x} ${x === 1 ? one : many}`;
@@ -694,9 +706,9 @@ function renderMarked() {
   rememberBatch(marked);
   if (!currentRun) return syncRenderButton();
   currentRun.highlight = marked; // saved with the run, so `llmscope sheet <id>` marks the same words
-  sheetSvg = keywordSvg = '';
-  $('tab-keywords').disabled = !marked.length;
-  if (!marked.length && view === 'keywords') setView('card');
+  drawn.clear();
+  syncTabs();
+  if (!marked.length && imageOf(view).when !== 'always') setView('card');
   else showActive(currentRun);
   syncRenderButton();
   store.saveRun(currentRun); // never rejects: a full quota is reported by the return value, not thrown
@@ -709,10 +721,19 @@ function offerTerms(terms) {
 }
 
 // ---------- the card and its tabs ----------
-const titleView = () => (view === 'keywords' ? keywordView : resultsView(lastPainted?.spec?.primary ?? primary()));
+// The tabs are the catalogue's rows, in its order: an image the CLI writes is an image the page offers, and one
+// added there appears here without this file changing. The ends of every reply have no tab of their own — they
+// are the Responses tab's *ends* excerpt — and download under their own name all the same.
+$('tabs').innerHTML = IMAGES.filter((i) => i.tab).map((i) =>
+  `<button id="tab-${i.kind}" class="${i.kind === view ? 'on' : ''}" disabled title="${esc(i.hint)}">${esc(i.tab)}</button>`).join('');
+for (const i of IMAGES) if (i.tab) $(`tab-${i.kind}`).addEventListener('click', () => setView(i.kind));
+
+/** The heading a titled image is drawn with: the keyword card remembers its own choice, the results card the other. */
+const titleFor = (kind) => (kind === 'keywords' ? keywordView : resultsView(lastPainted?.spec?.primary ?? primary()));
+const titleView = () => titleFor(view);
 
 function setCardView(next) {
-  if (view === 'keywords') { keywordView = next; keywordKey = ''; store.setPref('keyword_view', next); }
+  if (view === 'keywords') { keywordView = next; store.setPref('keyword_view', next); }
   else { cardView = next; store.setPref('card_view', next); }
   syncCardView();
 }
@@ -730,69 +751,73 @@ function showResults() {
 function paint(run) {
   lastPainted = run;
   showResults();
-  const a = analyze(run);
-  const names = Object.fromEntries(modelList.map((m) => [m.id, m.name]));
-  currentSvg = renderShareCard(a, { names, date: run.finished_at, title: resultsView(a.spec.primary) });
-  sheetSvg = keywordSvg = sheetKey = keywordKey = '';
+  drawn.clear(); // new replies, or display names newly arrived: every image is drawn again as it is asked for
   // A streaming run repaints many times a second; the words someone typed mid-run survive all of them, and only
   // a genuinely different run resets the box.
   if (run.id !== paintedId) {
     paintedId = run.id;
-    marked = cleanTerms(run.highlight ?? run.spec.keywords ?? []);
+    marked = cleanTerms(markedWords(run));
     pending = marked.slice();
     $('highlight-terms').value = pending.join(', ');
   }
   document.querySelector('.markbar').hidden = false;
-  $('tab-keywords').disabled = !marked.length;
-  if (!marked.length && view === 'keywords') setView('card');
+  syncTabs();
+  if (!marked.length && imageOf(view).when !== 'always') setView('card');
+  ['btn-json', 'btn-share'].forEach((id) => ($(id).disabled = false));
   showActive(run);
   renderResponses(run);
   syncRenderButton();
-  ['btn-svg', 'btn-png', 'btn-json', 'tab-card', 'tab-sheet'].forEach((id) => ($(id).disabled = false));
 }
 
-function showSheet(run) {
-  // Cached per mode and per set of marked words: a 4096px sheet is the expensive part of switching tabs.
-  const mode = $('sheet-excerpt').value || 'full';
-  const key = `${mode}|${marked.join(',')}`;
-  if (!sheetSvg || sheetKey !== key) {
-    sheetSvg = renderResponseSheet(run, { size: 4096, select: 'all', excerpt: mode, highlight: marked }).svg;
-    sheetKey = key;
-  }
-  $('card').innerHTML = sheetSvg;
+/** Which tabs can be opened: every image a run writes on its own, and the ones about marked words once there are words. */
+function syncTabs() {
+  for (const i of IMAGES) if (i.tab) $(`tab-${i.kind}`).disabled = i.when !== 'always' && !marked.length;
 }
 
-/** The second card: word × group beside word × family, over whatever the marking box last committed. */
-function showKeywords(run) {
-  if (!marked.length) return setView('card');
-  const key = `${keywordView}|${marked.join(',')}`;
-  if (!keywordSvg || keywordKey !== key) {
-    const names = Object.fromEntries(modelList.map((m) => [m.id, m.name]));
-    keywordSvg = renderKeywordCard(run, analyze(run), marked, { names, date: run.finished_at, title: keywordView });
-    keywordKey = key;
-  }
-  $('card').innerHTML = keywordSvg;
+/**
+ * What the image on show is drawn with, from the page's state: display names once the catalogue is in, the
+ * heading toggle where one applies, the marked words, and the Responses tab's excerpt. Everything else stays
+ * at the defaults a run is drawn with — the CLI's flags are the CLI's.
+ */
+function drawOpts(kind) {
+  return {
+    names: Object.fromEntries(modelList.map((m) => [m.id, m.name])),
+    title: imageOf(kind).titled ? titleFor(kind) : 'prompt',
+    highlight: marked,
+    excerpt: kind === 'responses' ? $('sheet-excerpt').value || 'full' : 'full',
+  };
 }
 
+/**
+ * Draw the image on show, or take it from the cache, and put it in the frame. An image with nothing to draw —
+ * the sentences page when none of the marked words matched — says so where the picture would be, the way the
+ * CLI refuses to draw headings over nothing, and offers nothing to download.
+ */
 function showActive(run) {
-  if (view === 'sheet') showSheet(run);
-  else if (view === 'keywords') showKeywords(run);
-  else $('card').innerHTML = currentSvg;
+  const opts = drawOpts(view);
+  const key = `${opts.title}|${opts.excerpt}|${marked.join(',')}`;
+  if (drawn.get(view)?.key !== key) drawn.set(view, { key, ...drawImage(view, run, opts) });
+  const { svg, empty } = drawn.get(view);
+  const why = empty || 'nothing to draw';
+  $('card').innerHTML = svg
+    || `<div class="empty"><p>${esc(why[0].toUpperCase() + why.slice(1))}.</p><p>Search the replies below for a word that did turn up, add it to the highlighted words, and render again.</p></div>`;
+  $('btn-svg').disabled = $('btn-png').disabled = !svg;
 }
 
 function setView(v) {
   view = v;
-  for (const [id, name] of [['tab-card', 'card'], ['tab-keywords', 'keywords'], ['tab-sheet', 'sheet']]) $(id).classList.toggle('on', v === name);
-  $('sheet-excerpt').hidden = v !== 'sheet';
-  $('card-view').hidden = v === 'sheet'; // the responses sheet has no title to choose
+  for (const i of IMAGES) if (i.tab) $(`tab-${i.kind}`).classList.toggle('on', v === i.kind);
+  $('sheet-excerpt').hidden = v !== 'responses';
+  $('card-view').hidden = !imageOf(v).titled; // a sheet has no heading to choose
   syncCardView();
   if (currentRun) showActive(currentRun);
 }
 
 // ---------- downloads ----------
-const activeSvg = () => (view === 'sheet' ? sheetSvg : view === 'keywords' ? keywordSvg : currentSvg);
-const SUFFIX = { sheet: '.responses', keywords: '.keywords', card: '' };
-const activeName = () => `llmscope-${$('spec-id').textContent}${SUFFIX[view] ?? ''}`;
+const activeSvg = () => drawn.get(view)?.svg || '';
+/** The image on show as the catalogue knows it: the Responses tab's ends excerpt is the ends image, here as on disk. */
+const activeKind = () => (view === 'responses' ? sheetKind({ select: 'all', excerpt: $('sheet-excerpt').value || 'full' }) : view);
+const activeName = () => `llmscope-${shownId()}${imageOf(activeKind()).suffix}`;
 
 function download(name, blob) {
   const a = document.createElement('a');
@@ -845,7 +870,7 @@ function syncKeyBadge() {
   // The box first: a key entered without "remember" is a real key for this session even though nothing is
   // stored, and a badge that called it "no key" would be telling the reader their run is about to fail.
   const key = keyValue() || store.readKey();
-  $('key-badge').innerHTML = key ? `key ${esc(maskKey(key))}` : '<span class="bad">no key</span> · sample data only';
+  $('key-badge').innerHTML = key ? `key ${esc(maskKey(key))}` : '<span class="bad">no key</span>';
 }
 
 async function verifyKey() {
@@ -892,17 +917,20 @@ async function start(kind) {
   if (kind === 'mock') provider = createMockProvider({ latency: 120 });
   else {
     const apiKey = keyValue() || store.readKey();
-    if (!apiKey) { problem('Connect an OpenRouter key to run. Press Change key above, or use Preview with sample data.'); return; }
+    if (!apiKey) { problem('Connect an OpenRouter key to run. Press Change key above.'); return; }
     provider = createOpenRouterProvider({ apiKey, referer: location.origin, title: 'llmscope', models: modelList.length ? modelList : null });
   }
   abort = new AbortController();
-  $('btn-run').disabled = $('btn-mock').disabled = true;
+  $('btn-run').disabled = true;
   $('btn-stop').hidden = false;
   // The run's own id, minted here so the partial painted mid-run and the finished run are one run to the page —
   // the words typed into the marking box while it streams survive the last repaint. It is not the eval's id:
   // running the same eval again is a new generation, saved beside the last one rather than over it.
   const id = await freshId(plan.id);
   const partial = { version: 'llmscope/0.1', id, spec_id: plan.id, spec: plan.spec, provider: provider.name, results: [] };
+  // The page's run is this one from its first reply. The table, the marking box and Save results all read
+  // `currentRun`, and until the run had finished they read the previous run while the card showed this one.
+  currentRun = partial;
   paintedId = null; // a new run brings its own marked words
   $('bar').style.width = '0%';
   $('progress-text').textContent = 'starting…';
@@ -918,6 +946,7 @@ async function start(kind) {
         if (now - last > 250 || done === total) { paint(partial); last = now; }
       },
     });
+    if (partial.highlight) currentRun.highlight = partial.highlight; // words marked while it streamed stay marked
     paint(currentRun);
     const errors = currentRun.results.filter((r) => r.error).length;
     $('progress-text').textContent = `${currentRun.results.length} responses · ${currentRun.aborted ? 'stopped' : 'done'} · ${provider.name}`
@@ -927,7 +956,7 @@ async function start(kind) {
   } catch (err) {
     problem(String(err.message || err));
   } finally {
-    $('btn-run').disabled = $('btn-mock').disabled = false;
+    $('btn-run').disabled = false;
     $('btn-stop').hidden = true;
   }
 }
@@ -991,13 +1020,12 @@ $('btn-change-key').addEventListener('click', () => { $('apikey').value = store.
 $('btn-run-as-is').addEventListener('click', () => leaveResolved(true));
 $('btn-change-first').addEventListener('click', () => leaveResolved(false));
 $('btn-run').addEventListener('click', () => start('openrouter'));
-$('btn-mock').addEventListener('click', () => start('mock'));
 $('btn-stop').addEventListener('click', () => abort?.abort());
-$('btn-copy').addEventListener('click', () => navigator.clipboard.writeText($('share-link').value).then(() => flash('btn-copy', 'Copied')));
+$('btn-share').addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText(shareLink); flash('btn-share', 'Copied'); }
+  catch (err) { problem(`Could not copy to the clipboard: ${err.message}`); }
+});
 
-$('tab-card').addEventListener('click', () => setView('card'));
-$('tab-keywords').addEventListener('click', () => setView('keywords'));
-$('tab-sheet').addEventListener('click', () => setView('sheet'));
 document.querySelectorAll('#card-view button').forEach((b) => b.addEventListener('click', () => {
   setCardView(b.dataset.view);
   if (lastPainted) paint(lastPainted);
@@ -1005,12 +1033,12 @@ document.querySelectorAll('#card-view button').forEach((b) => b.addEventListener
 }));
 
 $('btn-svg').addEventListener('click', () => download(`${activeName()}.svg`, new Blob([activeSvg()], { type: 'image/svg+xml' })));
-$('btn-png').addEventListener('click', async () => download(`${activeName()}.png`, await svgToPng(activeSvg(), view === 'sheet' ? 4096 : 1600)));
-$('btn-json').addEventListener('click', () => download(`llmscope-${$('spec-id').textContent}.results.json`, new Blob([JSON.stringify(currentRun, null, 2)], { type: 'application/json' })));
+$('btn-png').addEventListener('click', async () => download(`${activeName()}.png`, await svgToPng(activeSvg(), imageOf(activeKind()).size)));
+$('btn-json').addEventListener('click', () => download(`llmscope-${shownId()}.results.json`, new Blob([JSON.stringify(currentRun, null, 2)], { type: 'application/json' })));
 
 // "How much of each reply", the same three modes the CLI's rebuild menu offers.
 $('sheet-excerpt').innerHTML = Object.entries(EXCERPTS).map(([value, text]) => `<option value="${value}">${esc(text)}</option>`).join('');
-$('sheet-excerpt').addEventListener('change', () => { if (currentRun) showSheet(currentRun); });
+$('sheet-excerpt').addEventListener('change', () => { if (currentRun) showActive(currentRun); });
 
 // The marked words. Typing marks the table; the button is what reaches the images.
 $('highlight-terms').addEventListener('input', pendingChanged);
@@ -1040,7 +1068,7 @@ $('recent-runs').addEventListener('change', (e) => { pickRun(e.target.value); e.
 const exportName = (select) => {
   const { terms } = parseSearch(tableSearch());
   const extra = [select === 'all' ? '' : select, terms.length ? 'search' : ''].filter(Boolean).join('.');
-  return `llmscope-${$('spec-id').textContent}${extra ? '.' + extra : ''}`;
+  return `llmscope-${shownId()}${extra ? '.' + extra : ''}`;
 };
 $('btn-resp-json').addEventListener('click', async () => {
   if (!currentRun) return;
@@ -1057,9 +1085,11 @@ $('btn-resp-csv').addEventListener('click', () => {
 $('load-results').addEventListener('change', async (e) => {
   const file = e.target.files?.[0];
   if (!file) return;
+  closeOpener();
   try {
     const run = JSON.parse(await file.text());
     if (!Array.isArray(run.results) || !run.spec) throw new Error('not an llmscope results file');
+    openedFrom = null; // a file from disk is not a fork of a published eval, any more than a reopened run is
     await openRun(run, `loaded ${file.name} · ${run.results.length} responses · ${run.provider}`);
     await store.saveRun(run);
     await renderRecent();

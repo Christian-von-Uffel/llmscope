@@ -16,7 +16,7 @@ import { prettyName, monthStamp, quoted } from './render-share.js';
 import { keywordGrid } from './keyword-grid.js';
 import { modelFamily } from './models.js';
 import { logoFor } from './logos.js';
-import { pinTextWidths, SANS, MONO } from './text.js';
+import { pinTextWidths, SANS, MONO, FONT_METRICS } from './text.js';
 
 const pct = (x) => `${Math.round(x * 100)}%`;
 /** Gaps are spelled out. "pp" saves four characters and costs the reader the sentence. */
@@ -125,7 +125,7 @@ export function keywordFinding(grid, names = {}) {
 
 /** How tall a word's row may get before the heading has to give way. Below this the bars stop being readable. */
 export const MIN_ROW_H = 56;
-/** A row label's leading, when it takes two lines. */
+/** A row label's leading, and a wording heading's, when either takes two lines. */
 const LABEL_LEADING = 1.15;
 
 /** `text` cut to `width` at `size`, bold, ending in an ellipsis when it had to be. */
@@ -158,6 +158,57 @@ export function labelLines(label, width, rowH, { captioned = false } = {}) {
   if (fits([label], small)) return { size: small, lines: [label] };
   const n = Math.max(1, Math.min(2, Math.floor(room / (14 * LABEL_LEADING))));
   return { size: 14, lines: wrap(label, 14, width, n, true).map((l) => clipLine(l, 14, width)) };
+}
+
+/** A wording heading's ceiling; the size it is kept at while the family columns can spare the width, which is the */
+/** least a family name is set at; and its floor, past which a word is cut. */
+const HEAD_MAX = 32;
+const HEAD_WANT = 20;
+const HEAD_MIN = 13;
+
+/**
+ * The narrowest measure `text` sets in at `size`, bold, on one line or two: its own width, or the wider half of
+ * its best break between words. Never a break inside a word — a heading cut mid-word reads as a typo.
+ */
+function narrowest(text, size) {
+  const words = String(text).trim().split(/\s+/).filter(Boolean);
+  let best = textWidth(words.join(' '), size, true);
+  for (let k = 1; k < words.length; k += 1) {
+    const w = Math.max(textWidth(words.slice(0, k).join(' '), size, true), textWidth(words.slice(k).join(' '), size, true));
+    if (w < best) best = w;
+  }
+  return best;
+}
+
+/**
+ * The wordings as the headings of their columns, all at one size so no wording looks like the one that mattered.
+ * On one line at the heading size, or a little under it; failing that on two lines in the height the family logos
+ * take above the name line, at the largest size that keeps every line inside its column and breaks no word;
+ * failing that on one line at whatever size fits; and only past all of that cut with an ellipsis. Every line is
+ * measured against the column, never trusted to it: a heading that was measured but never made to fit ran under
+ * its neighbours, and four wordings read as one.
+ *
+ * @param {string[]} variants the wordings, in column order
+ * @param {number} width the measure: a column less its padding
+ * @param {number} room the height above the name baseline a second line may rise into
+ * @returns {{size: number, lines: string[][]}} one list of lines per wording, the last of them on the name baseline
+ */
+export function headingLines(variants, width, room) {
+  if (!variants.length) return { size: HEAD_MAX, lines: [] };
+  const fits = (lines, s) => lines.every((l) => textWidth(l, s, true) <= width);
+  const whole = (lines, v) => lines.join(' ') === v.trim().split(/\s+/).join(' '); // broken between words, not inside one
+  const twoLines = (s) => s * LABEL_LEADING + s * FONT_METRICS.ascent <= room;
+  const one = Math.min(...variants.map((v) => fit(v, HEAD_MAX, width, true, Math.round(HEAD_MAX * 0.7))));
+  if (variants.every((v) => fits([v], one))) return { size: one, lines: variants.map((v) => [v]) };
+  for (let s = HEAD_MAX; s >= HEAD_MIN; s -= 1) {
+    if (!twoLines(s)) continue;
+    const lines = variants.map((v) => (fits([v], s) ? [v] : wrap(v, s, width, Infinity, true)));
+    if (lines.every((ls, i) => ls.length <= 2 && fits(ls, s) && whole(ls, variants[i]))) return { size: s, lines };
+  }
+  const small = Math.min(...variants.map((v) => fit(v, HEAD_MAX, width, true, HEAD_MIN)));
+  if (variants.every((v) => fits([v], small))) return { size: small, lines: variants.map((v) => [v]) };
+  const n = twoLines(HEAD_MIN) ? 2 : 1;
+  return { size: HEAD_MIN, lines: variants.map((v) => wrap(v, HEAD_MIN, width, n, true).map((l) => clipLine(l, HEAD_MIN, width))) };
 }
 
 /**
@@ -217,7 +268,12 @@ export function renderKeywordCard(run, a, terms, { width = 1600, height = 1600, 
   const FAM_MIN = 88;
   const FAM_MAX = 168;
   const shrink = Math.min(1, room / (G * GROUP_W + F * FAM_MIN));
-  const groupW = GROUP_W * shrink;
+  // A wording heads its column, and a column too narrow for its wording at a reading size grows to take it: out
+  // of the gap between the blocks first, then out of the families, down to the least a family column may be.
+  // Wider bars than the card wanted cost less than a heading nobody can read. Past what the families can spare,
+  // the heading takes a second line, then a smaller size.
+  const headNeed = single ? 0 : Math.ceil(Math.max(...grid.variants.map((v) => narrowest(v, HEAD_WANT))) + 10); // to the pixel, so no fit turns on rounding
+  const groupW = clamp(GROUP_W * shrink, headNeed, Math.max(GROUP_W * shrink, (room - F * FAM_MIN) / G));
   const famW = Math.min(FAM_MAX, (room - groupW * G) / F);
   const varX = pad + labelW;
   // Whatever neither block takes widens the gap between them: the families stay on the right edge of the card.
@@ -284,9 +340,16 @@ export function renderKeywordCard(run, a, terms, { width = 1600, height = 1600, 
   const pctBase = rowsTop - 38;
   const nameBase = pctBase - famPct * 1.15;
   const logoTop = nameBase - famName * 0.95 - famLogo;
-  // Headings must clear their neighbours, so they are measured against the column, not the column plus its gutter.
-  const headSize = Math.min(...grid.variants.map((v) => fit(v, 32, groupW - 10, true, 13)));
-  if (!single) grid.variants.forEach((v, i) => text(varX + i * groupW + groupW / 2, nameBase, v, { size: headSize, weight: 700, fill: COLORS.accent, anchor: 'middle' }));
+  // Every heading line is measured against its own column, never the column plus its gutter, and a wording too
+  // long for one line takes two, up into the height the logos have beside it. The last line keeps the family
+  // names' baseline, so both kinds of heading are read along one line.
+  if (!single) {
+    const head = headingLines(grid.variants, groupW - 10, nameBase - blockTop);
+    grid.variants.forEach((v, i) => {
+      const ls = head.lines[i];
+      ls.forEach((l, j) => text(varX + i * groupW + groupW / 2, nameBase - (ls.length - 1 - j) * head.size * LABEL_LEADING, l, { size: head.size, weight: 700, fill: COLORS.accent, anchor: 'middle' }));
+    });
+  }
 
   // Each family heads its own column with its logo, its name, its hit rate over every word, and its own gap.
   const famLabel = (f) => `${familyName(f.family)}${f.models.length > 1 ? ` ×${f.models.length}` : ''}`;

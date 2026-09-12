@@ -8,9 +8,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { planRun, runEval, rescoreRun } from '../src/engine.js';
 import { analyze, totalTokens, defaultThreshold, outcomeOf, replyBody } from '../src/analyze.js';
 import { shortModel, signed } from '../src/render.js';
-import { renderShareCard } from '../src/render-share.js';
-import { renderKeywordCard } from '../src/render-keywords.js';
-import { renderResponseSheet, renderSentenceSheet, sentenceCount, selectResponses, excerpt as excerptOf, sheetPresets, SELECTIONS, EXCERPTS, SORTS, SENTENCE_SORTS, SENTENCE_LAYOUTS, SENTENCE_VOICES, SENTENCE_DEFAULTS, MARK_STYLES } from '../src/sheet.js';
+import { sentenceCount, selectResponses, excerpt as excerptOf, sheetPresets, SELECTIONS, EXCERPTS, SORTS, SENTENCE_SORTS, SENTENCE_LAYOUTS, SENTENCE_VOICES, SENTENCE_DEFAULTS, MARK_STYLES } from '../src/sheet.js';
+import { IMAGES, imagesFor, imageSuffix, sheetKind, markedWords, drawImage } from '../src/images.js';
 import { filterResponses, toCsv, toJson } from '../src/responses.js';
 import { shareText, altText, PLATFORM_MAX_BYTES } from '../src/share.js';
 import { ensureText, fontFilePaths, FONT_SANS } from '../src/text.js';
@@ -399,14 +398,14 @@ async function writeSheet(run, file, { select = 'all', size = 4096, maxFont = nu
   if (excerpt === 'matches' && !marking.length) {
     throw new Error('--excerpt matches shows the sentences a keyword matched, and this run marks nothing: name the words to match with --highlight word,phrase');
   }
-  const { svg, font, columns: cols, replies, exact, highlight: terms } = renderResponseSheet(run, { size, maxFont: maxFont || null, columns, select, url, highlight: marking, excerpt, sort });
+  // The ends of every reply are an image of their own, written by every run beside the full sheet; every other
+  // selection or excerpt redraws the responses image. The catalogue says which is which, and names both.
+  const kind = sheetKind({ select, excerpt });
+  const { svg, font, columns: cols, replies, exact, highlight: terms } = drawImage(kind, run, { size, maxFont: maxFont || null, columns, select, url, highlight: marking, excerpt, sort });
   const base = file.replace(/\.results\.json$/, '');
-  // The ends of every reply are an image of their own, written by every run beside the full sheet. Every other
-  // selection or excerpt redraws the responses image, as it always has.
-  const kind = excerpt === 'ends' && select === 'all' ? 'ends' : 'responses';
-  const svgPath = `${base}.${kind}.svg`;
+  const svgPath = `${base}${imageSuffix(kind)}.svg`;
   await fs.writeFile(svgPath, svg);
-  const raster = png ? await pngFromSvg(svg, `${base}.${kind}.png`, { maxBytes: PLATFORM_MAX_BYTES }) : null;
+  const raster = png ? await pngFromSvg(svg, `${base}${imageSuffix(kind)}.png`, { maxBytes: PLATFORM_MAX_BYTES }) : null;
   const pngPath = raster?.path || null;
   // The SVG is the sheet you read and the PNG is the sheet you post. Only the SVG carries the links — a model
   // name jumps to that model's replies, the background jumps back out, the URL opens the eval — and it is text,
@@ -481,9 +480,9 @@ async function writeSentenceSheet(run, file, { select = 'all', sort = 'group', m
   // As on the sheet, the edit lands on the run first, so every later image of it marks the same words.
   const marking = markedTerms(run, highlight);
   if (!marking.length) throw new Error('the sentences image is every sentence a marked word turned up in, and this run marks nothing: name the words with --highlight word,phrase (a keyword eval already marks its own)');
-  const page = renderSentenceSheet(run, { size, maxFont: maxFont || null, columns, select, sort, mark, layout, voice, clean, url, highlight: marking });
-  // A page of headings over nothing is not an answer: say which words were looked for rather than drawing it.
-  if (!page.matches) throw new Error(`nothing in this run matches ${marking.join(', ')}${select === 'all' ? '' : ` among ${SELECTIONS[select]}`}`);
+  const page = drawImage('sentences', run, { size, maxFont: maxFont || null, columns, select, sort, mark, layout, voice, clean, url, highlight: marking });
+  // A page of headings over nothing is not an answer: the catalogue says which words were looked for instead.
+  if (!page.svg) throw new Error(page.empty);
   const base = file.replace(/\.results\.json$/, '');
   // A page drawn any way but the default writes its own file, so the two can be opened side by side and compared.
   const changed = [
@@ -493,9 +492,9 @@ async function writeSentenceSheet(run, file, { select = 'all', sort = 'group', m
     clean === SENTENCE_DEFAULTS.clean ? null : 'markdown',
   ].filter(Boolean);
   const tag = suffix || changed.map((v) => `.${v}`).join('');
-  const svgPath = `${base}.sentences${tag}.svg`;
+  const svgPath = `${base}${imageSuffix('sentences')}${tag}.svg`;
   await fs.writeFile(svgPath, page.svg);
-  const raster = png ? await pngFromSvg(page.svg, `${base}.sentences${tag}.png`, { maxBytes: PLATFORM_MAX_BYTES }) : null;
+  const raster = png ? await pngFromSvg(page.svg, `${base}${imageSuffix('sentences')}${tag}.png`, { maxBytes: PLATFORM_MAX_BYTES }) : null;
   const pngPath = raster?.path || null;
   if (log) {
     const fitted = raster?.scaled ? ` · scaled to ${raster.width}px to fit the ${Math.round(PLATFORM_MAX_BYTES / 1e6)}MB upload limit` : '';
@@ -510,37 +509,77 @@ async function writeOutputs(run, { outDir = 'out', out, svg, png, url, title, hi
   markedTerms(run, highlight); // before the run is written out, so the results file carries the edit
   const a = analyze(run);
   const mode = titleMode(title, run.spec.card_title || defaultCardTitle(run.spec.primary));
-  const svgText = renderShareCard(a, { url: url || null, names: namesMap(), date: run.finished_at, title: mode });
   await fs.mkdir(outDir, { recursive: true });
   const paths = {
     json: out || path.join(outDir, `${run.id}.results.json`),
-    svg: svg || path.join(outDir, `${run.id}.svg`),
-    png: png === false ? null : png || path.join(outDir, `${run.id}.png`),
+    svg: svg || path.join(outDir, `${run.id}${imageSuffix('card')}.svg`),
+    png: png === false ? null : png || path.join(outDir, `${run.id}${imageSuffix('card')}.png`),
     mode,
+    keywords: null,
   };
   await fs.writeFile(paths.json, JSON.stringify(run, null, 2));
-  await fs.writeFile(paths.svg, svgText);
-  if (paths.png && !(await pngFromSvg(svgText, paths.png, { maxBytes: PLATFORM_MAX_BYTES }))) { paths.png = null; console.error(dim('PNG export needs @resvg/resvg-js (npm install @resvg/resvg-js); SVG written instead.')); }
   // The card is the artifact people post, and a PNG carries no words. Alt text and a caption go beside it so
   // the finding is still readable to a screen reader, to a search engine, and to anyone whose images failed.
   paths.share = paths.json.replace(/\.results\.json$/, '.share.txt');
   await fs.writeFile(paths.share, shareText(a, { names: namesMap(), url: url || null }));
-  // Second image: every reply on one sheet, so the pair shows everything a viewer needs.
-  const sheet = await writeSheet(run, paths.json, { png: png !== false, url, log: false, excerpt, sort });
-  paths.sheet = sheet.path;
-  paths.sheetPng = sheet.png;
-  // Third image: the first and last sentence of every reply, so where twenty models each opened and landed can be
-  // read side by side without the whole of any reply in the way. The full sheet is for reading one reply; this
-  // one is for comparing all of them.
-  const ends = await writeSheet(run, paths.json, { png: png !== false, url, log: false, excerpt: 'ends', sort });
-  paths.ends = ends.path;
-  paths.endsPng = ends.png;
-  // Fourth image, when there are words to compare: the rate of each one by group and by model. A run with no
-  // marked words has nothing to put on it, so it is written only when there is.
-  const terms = markedTerms(run);
-  const keywords = terms.length && a.variants.length ? await writeKeywordCard(run, paths.json, { terms, url, png: png !== false, log: false }) : null;
-  paths.keywords = keywords?.path || null;
-  return { analysis: a, paths, sheet, keywords };
+  // Every image the run writes, in the catalogue's order: the card, then the keyword card when words are marked,
+  // then the two sheets. The same list is what the browser offers and what the landing page's samples are drawn
+  // through, so what a run leaves in out/ and what the page shows can only differ by a row missing from one of
+  // them — and a row with no writer of its own here is still written, at its defaults.
+  const written = {};
+  const opts = { a, png: png !== false, url, excerpt, sort, title: mode };
+  for (const image of imagesFor(run)) {
+    const writer = WRITERS[image.kind] || ((r, p, o) => writeImage(r, p.json, image.kind, o));
+    written[image.kind] = await writer(run, paths, opts);
+  }
+  return { analysis: a, paths, sheet: written.responses, keywords: written.keywords || null };
+}
+
+/**
+ * How each image in the catalogue is written beside a run's results. The card, the sheets and the keyword card
+ * have writers of their own because each says something on the way out — the sheet its text size and column
+ * count, the keyword card its word count — and `paths` learns where each one landed.
+ */
+const WRITERS = {
+  async card(run, paths, { a, url, title }) {
+    const { svg } = drawImage('card', run, { a, url: url || null, names: namesMap(), date: run.finished_at, title });
+    await fs.writeFile(paths.svg, svg);
+    if (paths.png && !(await pngFromSvg(svg, paths.png, { maxBytes: PLATFORM_MAX_BYTES }))) { paths.png = null; console.error(dim('PNG export needs @resvg/resvg-js (npm install @resvg/resvg-js); SVG written instead.')); }
+    return { path: paths.png || paths.svg, png: paths.png, svg: paths.svg };
+  },
+  // Every reply on one sheet, so the card and the sheet together show a viewer everything.
+  async responses(run, paths, { png, url, excerpt, sort }) {
+    const sheet = await writeSheet(run, paths.json, { png, url, log: false, excerpt, sort });
+    paths.sheet = sheet.path;
+    paths.sheetPng = sheet.png;
+    return sheet;
+  },
+  // The first and last sentence of every reply, so where twenty models each opened and landed can be read side
+  // by side without the whole of any reply in the way. The full sheet is for reading one reply; this one is for
+  // comparing all of them.
+  async ends(run, paths, { png, url, sort }) {
+    const ends = await writeSheet(run, paths.json, { png, url, log: false, excerpt: 'ends', sort });
+    paths.ends = ends.path;
+    paths.endsPng = ends.png;
+    return ends;
+  },
+  // The rate of each marked word by group and by model. The catalogue offers it only when there are words.
+  async keywords(run, paths, { png, url }) {
+    const card = await writeKeywordCard(run, paths.json, { terms: markedTerms(run), url, png, log: false });
+    paths.keywords = card.path;
+    return card;
+  },
+};
+
+/** Any image in the catalogue, drawn at its defaults and written beside the run's results: what a kind gets until it has a writer of its own. */
+async function writeImage(run, file, kind, { a = null, url = null, png = true, title = 'prompt', highlight } = {}) {
+  const drawn = drawImage(kind, run, { a, url: url || null, names: namesMap(), date: run.finished_at, title, highlight: markedTerms(run, highlight) });
+  if (!drawn.svg) throw new Error(drawn.empty);
+  const base = file.replace(/\.results\.json$/, '');
+  const svgPath = `${base}${imageSuffix(kind)}.svg`;
+  await fs.writeFile(svgPath, drawn.svg);
+  const raster = png ? await pngFromSvg(drawn.svg, `${base}${imageSuffix(kind)}.png`, { maxBytes: PLATFORM_MAX_BYTES }) : null;
+  return { ...drawn, path: raster?.path || svgPath, png: raster?.path || null, svg: svgPath };
 }
 
 /** The whole run: defaults, cost estimate, confirmation, execution, outputs. Used by `run`, `new` and the menu. */
@@ -861,7 +900,7 @@ function markedTerms(run, edit) {
     if (edit === null) delete run.highlight;
     else run.highlight = edit;
   }
-  return run.highlight ?? run.spec.keywords ?? [];
+  return markedWords(run);
 }
 
 /** Save the run back, so an edit to what it marks outlives the command that made it. */
@@ -2095,11 +2134,12 @@ function keywordSummary(a, run) {
 async function writeKeywordCard(run, file, { terms, url = null, png = true, log = true, results = run.results, title = 'prompt' } = {}) {
   const a = analyze(run);
   await models({ quiet: true }); // display names, when the catalogue is already to hand
-  const svg = renderKeywordCard(run, a, terms, { url, date: run.finished_at, names: namesMap(), results, title });
+  const { svg, empty } = drawImage('keywords', run, { a, url, date: run.finished_at, names: namesMap(), results, title, highlight: terms });
+  if (!svg) throw new Error(`the keyword card is about the words a run marks, and ${empty}`);
   const base = file.replace(/\.results\.json$/, '');
-  const svgPath = `${base}.keywords.svg`;
+  const svgPath = `${base}${imageSuffix('keywords')}.svg`;
   await fs.writeFile(svgPath, svg);
-  const raster = png ? await pngFromSvg(svg, `${base}.keywords.png`, { maxBytes: PLATFORM_MAX_BYTES }) : null;
+  const raster = png ? await pngFromSvg(svg, `${base}${imageSuffix('keywords')}.png`, { maxBytes: PLATFORM_MAX_BYTES }) : null;
   const path0 = raster?.path || svgPath;
   if (log) console.log(`keywords:  ${path0}   ${dim(`${terms.length} word${terms.length === 1 ? '' : 's'} × ${a.variants.length} group${a.variants.length === 1 ? '' : 's'} × ${a.rows.length} models`)}`);
   return { path: path0, png: raster?.path || null, svg: svgPath };
@@ -2192,7 +2232,7 @@ async function cmdSets(args) {
  * Every module that puts marks on an image. An image is only as current as the newest of these: a fix to the way
  * a title is drawn leaves every card drawn before it a version behind, and nothing about the file says so.
  */
-const RENDERER_SOURCES = ['render.js', 'render-share.js', 'render-keywords.js', 'sheet.js', 'sentences.js', 'keyword-grid.js', 'text.js', 'analyze.js', 'logos.js', 'palette.js'];
+const RENDERER_SOURCES = ['images.js', 'render.js', 'render-share.js', 'render-keywords.js', 'sheet.js', 'sentences.js', 'keyword-grid.js', 'text.js', 'analyze.js', 'logos.js', 'palette.js'];
 
 /** When the renderer last changed, in epoch ms. */
 async function rendererStamp() {
@@ -2210,10 +2250,10 @@ async function rendererStamp() {
 async function imagesOf({ file, id }, { outDir }) {
   const base = file.replace(/\.results\.json$/, '');
   const card = path.join(outDir, id);
-  const drawn = (await Promise.all(
-    [`${card}.svg`, `${card}.png`, `${base}.responses.svg`, `${base}.responses.png`, `${base}.ends.svg`, `${base}.ends.png`, `${base}.keywords.svg`, `${base}.keywords.png`]
-      .map(async (f) => { try { return (await fs.stat(f)).mtimeMs; } catch { return null; } }),
-  )).filter((t) => t !== null);
+  // Every image a run writes on its own — never one drawn only on request, which no re-render makes current.
+  const files = IMAGES.filter((image) => image.when !== 'asked')
+    .flatMap((image) => ['svg', 'png'].map((ext) => `${image.kind === 'card' ? card : base}${image.suffix}.${ext}`));
+  const drawn = (await Promise.all(files.map(async (f) => { try { return (await fs.stat(f)).mtimeMs; } catch { return null; } }))).filter((t) => t !== null);
   return { count: drawn.length, oldest: drawn.length ? Math.min(...drawn) : null };
 }
 
@@ -2390,17 +2430,18 @@ async function menuAction(choice, args, { select, search }) {
     printSummary(analysis);
     // A run made before, or made without a PNG, keeps the files it has; one with no sheet at all gets one now.
     const exists = (f) => fs.access(f).then(() => f, () => null);
-    const svgPath = await exists(file.replace(/\.results\.json$/, '.responses.svg'));
-    const sheet = svgPath ? { path: svgPath, png: await exists(file.replace(/\.results\.json$/, '.responses.png')) } : await writeSheet(run, file, { log: false });
+    const base = file.replace(/\.results\.json$/, '');
+    const svgPath = await exists(`${base}${imageSuffix('responses')}.svg`);
+    const sheet = svgPath ? { path: svgPath, png: await exists(`${base}${imageSuffix('responses')}.png`) } : await writeSheet(run, file, { log: false });
     // The keyword card is found the same way. Without this the menu called every past run one that marks no
     // words, whatever it marked, and disabled the card sitting next to it in the folder.
     const marked = markedTerms(run);
     const keywords = marked.length
-      ? (await exists(file.replace(/\.results\.json$/, '.keywords.png')))
-        || (await exists(file.replace(/\.results\.json$/, '.keywords.svg')))
+      ? (await exists(`${base}${imageSuffix('keywords')}.png`))
+        || (await exists(`${base}${imageSuffix('keywords')}.svg`))
         || (await writeKeywordCard(run, file, { terms: marked, log: false })).path
       : null;
-    await afterRun(run, { json: file, png: file.replace(/\.results\.json$/, '.png'), svg: file.replace(/\.results\.json$/, '.svg'), sheet: sheet.path, sheetPng: sheet.png, keywords }, { outDir: args['out-dir'] || 'out', analysis, args });
+    await afterRun(run, { json: file, png: `${base}${imageSuffix('card')}.png`, svg: `${base}${imageSuffix('card')}.svg`, sheet: sheet.path, sheetPng: sheet.png, keywords }, { outDir: args['out-dir'] || 'out', analysis, args });
   }
   if (choice === 'file') await pickEval(['evals', 'examples'], { args, message: 'Which eval?' });
 }
