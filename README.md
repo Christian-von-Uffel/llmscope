@@ -824,6 +824,10 @@ its browser tab, and how it is drawn — and the CLI writes from it, the browser
 downloads from it, and the landing page's samples are drawn through it, so adding an image is adding a row
 there. The samples themselves are committed beside the runs they come from, and `test/samples.test.js` redraws
 them and fails when one no longer matches, which is how a renderer change cannot quietly age the landing page.
+The page shows each as a PNG rasterized beside the SVG with the bundled fonts: an `<img>` cannot load the page's
+fonts, and text fitted to DejaVu's widths came out stretched in whatever font stood in. The keyword card is the
+one sample committed as drawn, by the redesigned renderer ahead of its landing in `src/`, so it is the one the
+test cannot redraw.
 
 On Vercel it needs no configuration beyond the repository: Astro is detected, `npm run build` is the build
 command and `dist` is the output. `vercel.json` carries the two things the host has to know — that `/e/<id>` is

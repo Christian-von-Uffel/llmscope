@@ -153,25 +153,37 @@ try {
   </section>
 
   <section class="band alt" id="output">
-    <h2 class="band-title">Four images from one run</h2>
-    <p class="band-lede">Real output from real runs. Every run writes the card and two sheets of the replies themselves; a run that marks words writes the keyword grid too. Download any of them as SVG or PNG and post it as it stands — the wording is fixed so two cards can always be read against each other.</p>
+    <h2 class="band-title">Useful bias insights at a glance</h2>
+    <p class="band-lede">See which models exhibit bias, and where. Every run draws its results as images you can read in a second and post as they stand — the layouts are fixed, so two runs always read against each other — and keeps every reply behind them for you to search and export.</p>
+    <!-- Real output from real runs, shown as PNGs set in the fonts they were measured with: see PNG_WIDTH in
+         scripts/samples.mjs for why an <img> of the SVG came out with stretched text. -->
     <div class="shots">
       <figure>
-        <a href="/samples/card.svg" target="_blank" rel="noopener"><img src="/samples/card.svg" alt="A results card: three models by five wordings of the same prompt, each cell shaded by how often the model refused."></a>
-        <figcaption><b>The card.</b> Models down the side, wordings across the top, the prompt quoted at the head.</figcaption>
+        <a href="/samples/card.png" target="_blank" rel="noopener"><img src="/samples/card.png" alt="A refusal-rate card: three models by five wordings of the same prompt, each cell shaded by how often the model refused."></a>
+        <figcaption><b>Refusal rate.</b> See which models decline, and which wording of the prompt they decline for.</figcaption>
       </figure>
       <figure>
-        <a href="/samples/keywords.svg" target="_blank" rel="noopener"><img src="/samples/keywords.svg" alt="A keyword grid: marked words down the side, party wordings across, with a second grid counting the same words per model family."></a>
-        <figcaption><b>The keyword grid.</b> Which words landed on which group, beside which model family reached for them most.</figcaption>
+        <a href="/samples/keywords.png" target="_blank" rel="noopener"><img src="/samples/keywords.png" alt="A keyword-matching card: eight models, each with the wording of the prompt that made it reach for a charged word, the word itself, and how many of its runs used it."></a>
+        <figcaption><b>Keyword matching.</b> See where charged words show up: which model reached for them, under which wording, in how many runs.</figcaption>
       </figure>
       <figure>
-        <a href="/samples/responses.svg" target="_blank" rel="noopener"><img src="/samples/responses.svg" alt="A responses sheet: every matching reply in full, each in its model's colour, with the matched keywords marked."></a>
-        <figcaption><b>The responses.</b> Every reply behind the numbers, in the model's colour, with your marked words highlighted.</figcaption>
+        <a href="/samples/responses.png" target="_blank" rel="noopener"><img src="/samples/responses.png" alt="A responses sheet: every reply that used a marked word, cut to the sentence it landed in, grouped by wording and coloured by model."></a>
+        <figcaption><b>Responses.</b> See how keywords and phrases affect AI responses: the replies behind the numbers, grouped by wording, with the words you marked highlighted where they land.</figcaption>
       </figure>
       <figure>
-        <a href="/samples/ends.svg" target="_blank" rel="noopener"><img src="/samples/ends.svg" alt="A first-and-last-sentences sheet: how each of eight models opened its reply and where it landed, side by side, refusals marked with a red cross."></a>
-        <figcaption><b>The ends.</b> The first and last sentence of every reply, so how each model opens and where it lands reads side by side.</figcaption>
+        <a href="/samples/ends.png" target="_blank" rel="noopener"><img src="/samples/ends.png" alt="A first-and-last-sentences sheet: how each of seven models opened its reply to three wordings of one prompt and where it landed, refusals marked with a red cross."></a>
+        <figcaption><b>First and last sentences.</b> See the tone of responses at a glance: how each model opens its reply and where it lands, side by side.</figcaption>
       </figure>
+    </div>
+    <div class="extras">
+      <article class="feature">
+        <h3>Search responses</h3>
+        <p>Use a plain word or a regular expression to find any phrase across every reply, then mark what you find and redraw the images with it.</p>
+      </article>
+      <article class="feature">
+        <h3>Export responses</h3>
+        <p>Download every reply with its verdict as JSON, or the table you are looking at as CSV for a spreadsheet.</p>
+      </article>
     </div>
   </section>
 

@@ -4,7 +4,7 @@
 // step, and the directories it writes are generated. It runs before every build and every dev server.
 //
 //   /fonts/*.ttf          the three DejaVu faces the cards are measured with, from node_modules
-//   /samples/*.svg        the landing page's four example images, from assets/samples/
+//   /samples/*.png        the landing page's example images, from assets/samples/ — the PNGs the page shows
 //   /evals/<id>.json      the bundled evals, so a share link naming one resolves on the deployed site
 //   /og.png               the social card, committed alongside the samples it is drawn from
 //
@@ -42,11 +42,12 @@ await fs.mkdir(PUBLIC, { recursive: true });
 // through the same list src/text.js registers under Node rather than named a second time here.
 await into('fonts', FONT_FILES.map((f) => require.resolve(f.pkg)));
 
-const dirFiles = async (dir, ext) =>
-  (await fs.readdir(path.join(ROOT, dir))).filter((f) => f.endsWith(ext)).map((f) => path.join(ROOT, dir, f));
+const dirFiles = async (dir, keep) =>
+  (await fs.readdir(path.join(ROOT, dir))).filter(keep).map((f) => path.join(ROOT, dir, f));
 
-await into('samples', await dirFiles('assets/samples', '.svg'));
-await into('evals', await dirFiles('evals', '.json'));
+// The PNGs only: the SVGs beside them are what the test redraws, not what the page shows.
+await into('samples', await dirFiles('assets/samples', (f) => f.endsWith('.png') && f !== 'og.png'));
+await into('evals', await dirFiles('evals', (f) => f.endsWith('.json')));
 
 // The social card sits at the root of the site because that is the URL the meta tags name. It is drawn by
 // scripts/build-samples.mjs and committed, so this build — and the hosted one — only ever copies it.

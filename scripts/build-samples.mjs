@@ -2,13 +2,23 @@
 //
 // They are drawn from the runs committed in assets/samples/runs/ with the shipping renderers, through the same
 // catalogue the CLI writes from, so the page can never advertise an image the tool no longer draws — and
-// test/samples.test.js fails the moment a renderer change leaves one behind. Committing the SVGs rather than
+// test/samples.test.js fails the moment a renderer change leaves one behind. Committing the images rather than
 // rendering them in the browser keeps the landing page instant and keyless: nobody should need an OpenRouter
 // account to see what the output looks like.
+//
+// Each sample is written twice. The SVG is exactly what the renderer drew, and what the test holds it to. The
+// PNG beside it is what the page shows, set in the fonts the layout was measured with — see PNG_WIDTH in
+// scripts/samples.mjs for why an <img> of the SVG itself came out stretched.
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { Resvg } from '@resvg/resvg-js';
 import { ensureText, fontFilePaths, FONT_SANS } from '../src/text.js';
-import { SAMPLES, SAMPLES_DIR, drawSample } from './samples.mjs';
+import { SAMPLES, STATIC, SAMPLES_DIR, RUNS_DIR, PNG_WIDTH, pngName, drawSample } from './samples.mjs';
+
+const FONTS = { fontFiles: fontFilePaths(), loadSystemFonts: true, defaultFontFamily: FONT_SANS };
+
+/** The image as a PNG `width` pixels wide. */
+const rasterize = (svg, width) => new Resvg(svg, { font: FONTS, fitTo: { mode: 'width', value: width } }).render().asPng();
 
 /**
  * The social card, from the results card that was just drawn. Cards are square because they are made to be
@@ -19,13 +29,9 @@ import { SAMPLES, SAMPLES_DIR, drawSample } from './samples.mjs';
  * copies it and never renders it, so hosting the site needs no native renderer at all.
  */
 async function socialCard(svg, file) {
-  const { Resvg } = await import('@resvg/resvg-js');
   const { createCanvas, loadImage } = await import('@napi-rs/canvas');
   const [W, H] = [1200, 630];
-  const square = new Resvg(svg, {
-    font: { fontFiles: fontFilePaths(), loadSystemFonts: true, defaultFontFamily: FONT_SANS },
-    fitTo: { mode: 'height', value: H },
-  }).render().asPng();
+  const square = new Resvg(svg, { font: FONTS, fitTo: { mode: 'height', value: H } }).render().asPng();
   const ctx = createCanvas(W, H).getContext('2d');
   ctx.fillStyle = '#0f1113'; // the card's own background, so the ground it sits on is not a seam
   ctx.fillRect(0, 0, W, H);
@@ -44,6 +50,14 @@ for (const sample of SAMPLES) {
   const svg = await drawSample(sample, cache);
   written[sample.file] = svg;
   await fs.writeFile(path.join(SAMPLES_DIR, sample.file), svg);
-  console.log(`${sample.file.padEnd(16)} ${sample.run}  ${(svg.length / 1024).toFixed(0)}KB`);
+  const png = rasterize(svg, PNG_WIDTH);
+  await fs.writeFile(path.join(SAMPLES_DIR, pngName(sample.file)), png);
+  console.log(`${sample.file.padEnd(16)} ${sample.run}  ${(svg.length / 1024).toFixed(0)}KB  → ${pngName(sample.file)} ${(png.length / 1024).toFixed(0)}KB`);
+}
+// The static samples are not drawn, only checked for: the page would show a broken image where one is missing.
+for (const s of STATIC) {
+  const png = await fs.stat(path.join(SAMPLES_DIR, s.file)).catch(() => null);
+  const run = await fs.stat(path.join(RUNS_DIR, `${s.run}.results.json`)).catch(() => null);
+  console.log(`${s.file.padEnd(16)} ${s.run}  ${png ? `${(png.size / 1024).toFixed(0)}KB  committed as drawn` : 'MISSING'}${run ? '' : '  (run missing)'}`);
 }
 await socialCard(written['card.svg'], path.join(SAMPLES_DIR, 'og.png'));

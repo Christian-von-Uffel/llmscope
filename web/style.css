@@ -118,6 +118,8 @@ button:disabled, .btn:disabled { opacity: .42; cursor: not-allowed; }
 .shots img { display: block; width: 100%; aspect-ratio: 1; object-fit: contain; }
 .shots figcaption { margin-top: 12px; font-size: 14px; color: var(--muted); }
 .shots figcaption b { color: var(--text); }
+/* What a run keeps behind the images, without an image of its own: two notes in the same dress as the features. */
+.extras { display: grid; grid-template-columns: repeat(2, 1fr); gap: 22px; margin-top: 22px; }
 
 .steps { margin: 0; padding-left: 22px; display: grid; gap: 12px; max-width: 76ch; color: #3c414a; font-size: 15.5px; }
 .steps b { color: var(--text); }
@@ -134,7 +136,7 @@ button:disabled, .btn:disabled { opacity: .42; cursor: not-allowed; }
   .hero { grid-template-columns: 1fr; gap: 28px; padding-bottom: 56px; }
   .hero-art { justify-content: flex-start; }
   .scope-xl { max-width: 150px; }
-  .cards, .shots { grid-template-columns: 1fr; }
+  .cards, .shots, .extras { grid-template-columns: 1fr; }
   .site-nav a { display: none; }
   /* The headline's hand-placed break belongs to the two-column hero; narrow, the text finds its own. */
   .wide-only { display: none; }
