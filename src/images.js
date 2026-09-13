@@ -35,7 +35,7 @@ export const IMAGES = [
   },
   {
     kind: 'keywords', suffix: '.keywords', size: 1600, when: 'marked', tab: 'Keywords', titled: true,
-    hint: 'which words landed on which group, beside which model family reached for them most — needs words to mark',
+    hint: 'which model replied with which marked word for which wording, and in how many of its responses — needs words to mark',
     draw: (run, o) => (o.highlight.length
       ? { svg: renderKeywordCard(run, o.a, o.highlight, { width: o.size, height: o.size, names: o.names, url: o.url, date: o.date, title: o.title, results: o.results ?? run.results }) }
       : { svg: '', empty: 'this run marks no words' }),

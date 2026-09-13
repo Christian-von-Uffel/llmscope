@@ -13,7 +13,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { Resvg } from '@resvg/resvg-js';
 import { ensureText, fontFilePaths, FONT_SANS } from '../src/text.js';
-import { SAMPLES, STATIC, SAMPLES_DIR, RUNS_DIR, PNG_WIDTH, pngName, drawSample } from './samples.mjs';
+import { SAMPLES, SAMPLES_DIR, PNG_WIDTH, pngName, drawSample } from './samples.mjs';
 
 const FONTS = { fontFiles: fontFilePaths(), loadSystemFonts: true, defaultFontFamily: FONT_SANS };
 
@@ -53,11 +53,5 @@ for (const sample of SAMPLES) {
   const png = rasterize(svg, PNG_WIDTH);
   await fs.writeFile(path.join(SAMPLES_DIR, pngName(sample.file)), png);
   console.log(`${sample.file.padEnd(16)} ${sample.run}  ${(svg.length / 1024).toFixed(0)}KB  → ${pngName(sample.file)} ${(png.length / 1024).toFixed(0)}KB`);
-}
-// The static samples are not drawn, only checked for: the page would show a broken image where one is missing.
-for (const s of STATIC) {
-  const png = await fs.stat(path.join(SAMPLES_DIR, s.file)).catch(() => null);
-  const run = await fs.stat(path.join(RUNS_DIR, `${s.run}.results.json`)).catch(() => null);
-  console.log(`${s.file.padEnd(16)} ${s.run}  ${png ? `${(png.size / 1024).toFixed(0)}KB  committed as drawn` : 'MISSING'}${run ? '' : '  (run missing)'}`);
 }
 await socialCard(written['card.svg'], path.join(SAMPLES_DIR, 'og.png'));

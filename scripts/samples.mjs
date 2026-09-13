@@ -22,9 +22,10 @@ export const PNG_WIDTH = 1200;
 export const pngName = (file) => file.replace(/\.svg$/, '.png');
 
 // Each sample answers a different question, so they come from different runs rather than views of one: a
-// refusal card that splits by identity, a sheet of replies where the marks actually land, and the ends of every
-// reply in a run with several wordings and enough models for the sheet to read across as well as down. Every one
-// is drawn through the catalogue, at the defaults a run is drawn with, except where a sample says otherwise: no
+// refusal card that splits by identity, a sheet of replies where the marks actually land, the ends of every
+// reply in a run with several wordings and enough models for the sheet to read across as well as down, and the
+// keyword card of a run where two models reached for a word on one wording and not the others. Every one is
+// drawn through the catalogue, at the defaults a run is drawn with, except where a sample says otherwise: no
 // display names, so the samples need no catalogue fetch.
 export const SAMPLES = [
   // No title given, so the sample is the card a run draws by default: the prompt at the head, no finding stated.
@@ -33,14 +34,10 @@ export const SAMPLES = [
   { file: 'responses.svg', run: 'dbo50g', kind: 'responses', opts: { size: 1400, select: 'matched', excerpt: 'matches' } },
   // The image every run writes beside the full sheet, as `llmscope sheet <id> --excerpt ends` re-makes it.
   { file: 'ends.svg', run: 'GK1zvv', kind: 'ends', opts: { size: 1400 } },
-];
-
-// Committed as drawn, not redrawn here. The keyword card the page shows is the redesigned one — each model, the
-// wording that made it reach for a marked word, the word itself, and a dot per run — drawn from run mwbXAp ahead
-// of that renderer landing in src/. Its run sits beside it like the others'. When the renderer arrives, this
-// becomes a SAMPLES row and the test holds it like the rest.
-export const STATIC = [
-  { file: 'keywords.png', run: 'mwbXAp', kind: 'keywords' },
+  // The keyword card: each model, the wording that made it reply with a marked word, the word itself, and a dot
+  // per response. The run marks four words — the eval's three and "myth", added after reading the replies — and the card
+  // is drawn over all four, as `llmscope keywords mwbXAp` draws it.
+  { file: 'keywords.svg', run: 'mwbXAp', kind: 'keywords', opts: {} },
 ];
 
 /** A sample's run, scored by the current rules, the way every command loads one. */

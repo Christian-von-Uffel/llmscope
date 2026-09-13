@@ -2130,7 +2130,7 @@ function keywordSummary(a, run) {
   return `${terms.length} word${terms.length === 1 ? '' : 's'} × ${groups} wording${groups === 1 ? '' : 's'} × ${a.rows.length} model${a.rows.length === 1 ? '' : 's'}`;
 }
 
-/** The keyword card: which words separate the groups, and whether every model separates them the same way. */
+/** The keyword card: which model replied with which marked word, for which wording, in how many of its responses. */
 async function writeKeywordCard(run, file, { terms, url = null, png = true, log = true, results = run.results, title = 'prompt' } = {}) {
   const a = analyze(run);
   await models({ quiet: true }); // display names, when the catalogue is already to hand
@@ -2480,14 +2480,15 @@ const HELP = `llmscope — deterministic LLM bias evals (bring your own OpenRout
                                      Both narrow with --refused, --matched, --model and --variant, and both
                                      ignore --excerpt: an export carries every reply in full, or whatever is
                                      counted from it later is counted off a reply that was cut short.
-  llmscope keywords <id>        re-make the keyword card: each marked word by group, then by model family.
-                                Rows run by the gap they open, group columns by how often the words were found
-                                in them, family columns by hit rate — so the leftmost family is the one this
-                                wording turns up in most, and each row rings the family it came from. Written
-                                automatically by any run that marks words.
+  llmscope keywords <id>        re-make the keyword card: one line per model and wording, with each marked
+                                word the model replied with in a red chip, its rate, and a dot per response.
+                                A word counts when it was in at least two of a wording's responses and half
+                                of them; a wording
+                                with nothing that counted has no line, and a model with no claim is listed
+                                with "no matches". Written automatically by any run that marks words.
                                 [--highlight word,phrase] counts words the eval never scored on, so a refusal
                                 or sentiment run can be charted for wording noticed while reading the replies
-                                [--title finding] puts the family that said the words most on top instead of
+                                [--title finding] puts the strongest claim on top as a sentence instead of
                                 the prompts, for when the point of the image is the result and not the ask
   llmscope sentences <id>       a different image: how many times the marked words matched, counted under the
                                 variable the eval swapped, with each match shown in the sentence it turned up in.
@@ -2599,10 +2600,10 @@ slots picked out, stating no finding, because the ask is what a reader needs to 
 --title finding puts the generated sentence on top instead, for when the result is the point of the image. Every run writes three images: the card (out/<id>.png), every reply on one
 sheet (out/<id>.responses.svg, and the same sheet as out/<id>.responses.png for posting), and the first and last sentence of every reply (out/<id>.ends.png), plus out/<id>.results.json. Every run gets a fresh id, so
 running an eval twice keeps both runs; the spec is saved once, under its own content-addressed id, as evals/<eval id>.json for reruns. A run
-that marks words writes a third, the keyword card (out/<id>.keywords.png): each word's rate by wording beside the
-model families ranked by hit rate, which is the image for "which group do these words land on, and which family
-is producing them". It leads with the prompts and states no finding; llmscope keywords <id> --title finding
-re-makes it with the family that said the words most on top instead. A fourth image is written only when asked
+that marks words writes a third, the keyword card (out/<id>.keywords.png): one line per model and wording, with
+each marked word the model replied with, its rate and a dot per response, which is the image for "which model
+replied with these words, for which wording". It leads with the prompts and states no finding; llmscope keywords <id> --title finding
+re-makes it with the strongest claim on top instead. A fourth image is written only when asked
 for: llmscope sentences <id> counts the matches under the variable the eval swapped and shows each one in the
 sentence it turned up in, which is where the keyword card's rates are checked against the words they were counted
 from and against the model that produced them.`;

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { ensureText } from '../src/text.js';
-import { SAMPLES, STATIC, SAMPLES_DIR, RUNS_DIR, pngName, drawSample } from '../scripts/samples.mjs';
+import { SAMPLES, SAMPLES_DIR, pngName, drawSample } from '../scripts/samples.mjs';
 
 // The landing page's images are committed, so a renderer change leaves them behind unless something notices.
 // This does: each sample is drawn again from the run committed beside it and has to come out byte for byte the
@@ -19,16 +19,11 @@ test('every landing-page sample is what the current renderers draw from its comm
   }
 });
 
-// The page shows PNGs, not the SVGs the test above redraws, so each has to be there too — and the one sample
-// committed as drawn elsewhere has to be there with the run it came from, since nothing here can redraw it.
-test('every sample has the PNG the page shows, and a static sample has its run beside it', async () => {
+// The page shows PNGs, not the SVGs the test above redraws, so each has to be there too.
+test('every sample has the PNG the page shows', async () => {
   const exists = async (file) => (await fs.stat(file).catch(() => null))?.size > 0;
   for (const sample of SAMPLES) {
     assert.ok(await exists(path.join(SAMPLES_DIR, pngName(sample.file))), `${pngName(sample.file)} is missing: run \`node scripts/build-samples.mjs\` and commit assets/samples/`);
-  }
-  for (const s of STATIC) {
-    assert.ok(await exists(path.join(SAMPLES_DIR, s.file)), `${s.file} is committed as drawn and cannot be redrawn here, and it is missing`);
-    assert.ok(await exists(path.join(RUNS_DIR, `${s.run}.results.json`)), `${s.file} is drawn from run ${s.run}, which belongs beside it in assets/samples/runs/`);
   }
 });
 

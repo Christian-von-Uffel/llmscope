@@ -230,7 +230,7 @@ opens the newest run of that eval; the listing shows which eval each run came fr
 | `out/<id>.png`, `out/<id>.svg` | the card. `llmscope render out/<id>.results.json` rebuilds it without new API calls, and `llmscope render --stale` rebuilds every run in `out/` whose images were drawn before the current renderer. |
 | `out/<id>.responses.svg`, `.png` | every reply on one 4096 px image, one reply per line under a heading per group, each opening with its model's mark and name. The card plus this sheet show a viewer everything. The SVG is the one that opens: it is clickable (see below) and it stays sharp however far in you zoom; the PNG is for posting. |
 | `out/<id>.ends.svg`, `.png` | the first and last sentence of every reply on one image, set out the same way: how each model opens and where it lands, side by side. `llmscope sheet <id> --excerpt ends` re-makes it. |
-| `out/<id>.keywords.png`, `.svg` | the keyword card, written by any run that marks words: each word's rate by group, beside the model families ranked by how often it was found in their outputs. `llmscope keywords <id>` re-makes it. |
+| `out/<id>.keywords.png`, `.svg` | the keyword card, written by any run that marks words: one line per model and wording, with each marked word the model replied with in a red chip, its rate, and a dot per response. `llmscope keywords <id>` re-makes it. |
 | `out/<id>.sentences.png`, `.svg` | the sentences image, written only when you ask for it with `llmscope sentences <id>`: how many times the marked words matched, counted under the variable the eval swapped and split by model, each match shown in the sentence it turned up in. |
 
 After a run the CLI offers to open the card, browse the responses, or open the folder. Later:
@@ -463,8 +463,8 @@ responses image…* menu all follow the edit rather than reverting to the eval's
 you like; `--highlight reset` forgets the edit and hands the job back to the eval's own keywords. The menu after
 a run (and *Browse past results* for an older one) offers **Edit the highlighted words…**, prefilled with what
 the run marks now, so adding or dropping one is an edit rather than a retype. In the browser, the box beside the
-Keywords, Sentences and Responses tabs does the same — it is one setting, so it marks the replies, counts the
-keyword card's rows and gathers the sentences page at once — and the search box under the card is how those
+Keywords, Sentences and Responses tabs does the same — it is one setting, so it marks the replies, draws the
+keyword card's claims and gathers the sentences page at once — and the search box under the card is how those
 words get there: find them in the output, then *Add to highlights*. The edit travels: *Save results* writes it
 into the JSON, so `llmscope sheet` on that file marks the same words.
 
@@ -552,76 +552,59 @@ denominators rather than only dropping rows. And because the words come from `--
 eval can be counted for words it never scored on: `llmscope results <id> --counts --highlight so-called,alleged`
 asks a question of replies that were collected to answer a different one.
 
-**The keyword card.** The same numbers as an image, written by every run that marks words (`out/<id>.keywords.png`),
-re-made by `llmscope keywords <id>`, and opened in the browser from the **Keywords** tab over the preview — which
-is live, so editing the marking box beside it redraws the card over the new words.
+**The keyword card.** Written by every run that marks words (`out/<id>.keywords.png`), re-made by
+`llmscope keywords <id>`, and opened in the browser from the **Keywords** tab over the preview — which is live, so
+editing the marking box beside it redraws the card over the new words.
 
-**It leads with the prompts and states no finding.** What was asked is the most straightforward thing to put in
-front of a viewer, so the heading is every prompt the run sent, quoted in full with its slots picked out, over a
-neutral setup line — `WHICH WORDS APPEAR FOR WHICH WORDING · 5 WORDS · 8 MODELS · 2 PROMPTS · 6 RUNS EACH`, the
-question the card asks and never what it found. The line leads with the question rather than the method, because
-nobody opens the card wanting a count of words: they want to know whether a word turns up more for one group than
-for another. With a single group it asks the question it can — `WHICH WORDS APPEAR, AND IN WHOSE OUTPUTS`. The grid under it is what says what came back. `llmscope keywords <id> --title finding`
-(or the Finding button over the preview) re-makes it with the sentence on top instead, for when the point of the
-image is the result rather than the ask. Both cards default to the prompts, and the toggle remembers its own
-answer for each. It is the picture to post beside the main card when the finding is about
-wording rather than rates, and it is built to answer two questions in one glance: which group the words land on
-hardest, and which model family they are turning up in.
+**It is a list of claims, not a grid.** The card was rebuilt from the sentences it should support — *Grok 4.6
+replied with "myth" in 2 of the 3 responses where the prompt said "childhood vaccination"* — because the one
+relationship a wording eval turns on is the one between a model, the wording it was given and the word it came
+back with. Each line
+is one such claim: the model with its logo, the wording in the colour the prompt's slot wears, an arrow, then each
+word in a red chip with its rate in the largest type on the line and one dot per response under it, filled for
+the responses the word was in. **A word counts for a wording only when it was in at least two of that wording's
+responses and at least half of them.** A single stray reply is not a claim and is not drawn: at three responses a
+wording, one such reply is already a 33-point gap, which is how the grid this replaced came to flag noise. Wordings with the same outcome
+share a line — *childhood vaccination · heavy metals → "myth" 67%* — and a wording with no counted word has no
+line, so a model's block reads as the wordings that moved it and nothing else.
 
-It is the terminal's counts table, widened, and **every axis is ordered by size, so reading it is reading a
-ranking rather than an alphabet** — which the blocks show by descending, so the card spends no line saying it.
-Rows are the words, ordered by the widest gap they open between groups. The
-left block is word × group, with groups running from the one the words were found in most to the one they
-missed. The right block is word × family, with families running from the highest hit rate down — which makes the
-leftmost family the one this wording turns up in most often.
+The grid it replaced — word × wording on the left, word × model family on the right — could say which model
+replied with a word at all, and which wording a word landed on across every model, but never which model replied
+with a word for one wording and not another. Pooling the models hid the disagreement: one card read *"suspicious": most in Black*
+while, model by model, Gemini's went to white and Qwen's to Hispanic.
 
-| | what it shows | how to read it |
-|---|---|---|
-| left, word × group | the model outputs the word was found in, per group | along a row: is one group getting this word more? down a column: which words characterize this group? |
-| right, word × family | that family's outputs the word was found in, every group pooled | along a row: which family is this word coming from? the leading cells are the answer. down a column: how much of this wording that family puts out |
+**Every model that ran is on the card.** Models are ranked by their strongest claim, and one with no claim is still
+listed, by name and logo, with *no matches* beside it: who is clean is half of "which models". The names are the
+catalogue's display names when the CLI has them (*Mistral Medium 3.5*), the id's own otherwise. A card with more
+models than fit at reading height folds the clean ones into one line that still names them, and only then counts
+off the lowest-ranked claims — it would rather say it left some out than draw them too small to read.
 
-Every cell carries its own number, because the point of the card is to be read rather than estimated. Each
-family heads its column with its logo, its name and **its hit rate over all the words** — the figure it was
-ranked by. A family is one column however many of its models ran, and `×3` in the heading says how many; run
-`--models gemini` and fifteen Gemini models pool into one ranked column. Nothing rings the largest cell of a row
-and nothing keys the marks under the card: both blocks descend from the left, so ordering already puts the cell a
-reader wants where they look first, and a labelled bar under a named column says what a legend would have said.
+**It leads with the prompts and states no finding.** The heading is every prompt the run sent, quoted in full with
+its slots picked out, straight under the brand line; nothing else stands between the reader and what was asked.
+`llmscope keywords <id> --title finding` (or the Finding button over the preview) puts the strongest claim on top
+instead, as the sentence it is — *Mistral Medium 3.5 replied with "misinformation" and "myth" in all 3 responses
+where the prompt said "childhood vaccination"* — on two lines at the largest size pretext fits them at and never a
+third, with the first prompt quoted small under it and the rest counted off — *+ 1 more prompt sharing {race}*, the same line the
+main card carries. Both cards default to the prompts, and the toggle remembers its own answer for each.
 
-**When the finding is asked for, it is a model, not a gap.** A reader carries away *which model is doing this*, so
-the top line names the family these words landed on hardest, the one word that landed there hardest, and what the
-rest of the field did with that same word: *"extreme" found in 29% of GROK's outputs, against 4% across the other 7 families.* Both
-numbers are cells on the grid below it — the rate printed in that family's column, and the average of the rest of
-that row — so the sentence can be checked against the picture rather than taken on trust. The widest gap between
-wordings is the line under it, in amber: *The widest gap between wordings is "extreme": 31% of outputs for
-"Libertarian" against 4% for "Democratic".* With a single group there is no gap, and that line reports what the
-whole field did with the word instead.
+**The key is drawn, not described.** Under the list sit a sample chip, a sample row of dots with a rate, and *no
+matches*, each beside what it means in the run's own numbers — *the responses it appeared in, out of 3* · *no
+word in 2 or more of 3 responses* — so a reader matches the sample to the line above it rather than learning that
+"red" means the chip. The only metadata left is the runs line and the id.
 
-**Found in, not used.** A word appearing in an output is all a run measures. "Used" would put a choice behind it
-that nothing here establishes, so the card, its headline, its setup line and the terminal table all say what was
-found. Every rate is a share of outputs, not a share of models, which is a different statistic and a smaller
-number.
+**Replied with.** The run measures a word appearing in a response, and *replied with* says exactly that: it
+claims nothing about why the model chose the word, so the sentence stays true of a model that wrote "the link
+is a myth" to debunk it. The sentence counts responses rather than quoting a rate — *2 of the 3 responses*, *all
+3 responses* — because the dots on the line are counts and a reader wants to meet the same number twice; a line
+whose words sit at different counts is claimed at the lower one, *at least 2 of the 3*. One constant in
+`src/render-keywords.js` (`VERB`) carries the verb, if it moves again. Every rate on the card is a share of one
+wording's responses for one model, never a share of models.
 
-**Every prompt the run pooled is accounted for.** The cells pool all of a run's prompts. The prompt-title card
-quotes them all; the finding-title card has already spent its top on the sentence, so it quotes the first and
-counts the rest off underneath — *+ 1 more prompt sharing {race}* — the same line the main card carries.
-
-**Nothing on the card is an abbreviation or a bare symbol.** Gaps are spelled out in points, never as `pp`, and
-there is no Δ column: the rows are already in gap order, both group rates are printed in the row, and a column
-of amber-or-gray numbers was a third style earning its keep by restating what the bars said. What survives is
-the rule down the left of a row whose gap clears 25 points, which sits at the top of a card ordered by gap.
-
-Each block is drawn against its own stated ceiling (`wording bars to 30% · family bars to 40%`) rather than 100%:
-a card whose highest rate is 29% would otherwise spend two thirds of its width on empty track, and one block's
-outlier would squash the other. Rows past the twelfth are dropped and counted off in the same line, so a
-forty-keyword eval still produces a readable card. With a single group there is no gap to measure and the family
-ranking carries the card on its own.
-
-**Why the bars have a light cap.** The fill is the same red the other cards use for "included the keyword", and red
-against its own track is 1.8:1 for a protanope — too close to read a length off. A bar is read by *where it ends*,
-so the end carries a light rule: the datum sits on a luminance edge, which is the one cue every kind of color
-vision keeps. The percentage rides its own bar, inside the end when the bar is long enough to hold it and just past
-the end when it is not, so it never lands on the cap. `test/keyword-card.test.js` holds the card to this, the way
-`test/a11y.test.js` holds the responses sheet to its highlight.
+**Nothing on the card is an abbreviation.** Rates are percentages and runs are dots; the one symbol is the arrow
+between the wording and the words it produced, which is the claim's own shape. A word in its red chip is AA
+against it for every kind of color vision, and a filled dot against a hollow one is read by fill, not hue.
+`test/keyword-card.test.js` holds the card to all of this, the way `test/a11y.test.js` holds the responses sheet
+to its highlight.
 
 Because the words come from whatever the run marks, the card follows `--highlight` like everything else:
 `llmscope keywords <id> --highlight so-called,alleged` charts a refusal eval for wording it never scored on, and
@@ -704,7 +687,7 @@ compare the groups by how much of this wording each drew, with the models counte
 Nothing on it scores. The matches are found by the same matcher the run scored with, so the page is exactly the
 text behind the numbers — but which words you count moves no rate, no verdict and no card, which is why
 `--highlight` can be pointed at any word after the fact. It is written only when asked for, because it is the
-image you go to once the keyword card has told you which group and which model to go and read.
+image you go to once the keyword card has told you which model and which wording to go and read.
 
 **Reading the replies somewhere else.** Four flags take the replies out of the terminal — two for reading them,
 two for counting them:
@@ -825,9 +808,7 @@ downloads from it, and the landing page's samples are drawn through it, so addin
 there. The samples themselves are committed beside the runs they come from, and `test/samples.test.js` redraws
 them and fails when one no longer matches, which is how a renderer change cannot quietly age the landing page.
 The page shows each as a PNG rasterized beside the SVG with the bundled fonts: an `<img>` cannot load the page's
-fonts, and text fitted to DejaVu's widths came out stretched in whatever font stood in. The keyword card is the
-one sample committed as drawn, by the redesigned renderer ahead of its landing in `src/`, so it is the one the
-test cannot redraw.
+fonts, and text fitted to DejaVu's widths came out stretched in whatever font stood in.
 
 On Vercel it needs no configuration beyond the repository: Astro is detected, `npm run build` is the build
 command and `dist` is the output. `vercel.json` carries the two things the host has to know — that `/e/<id>` is
