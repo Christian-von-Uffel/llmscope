@@ -22,26 +22,13 @@ export const PNG_WIDTH = 1200;
 export const pngName = (file) => file.replace(/\.svg$/, '.png');
 
 // Each sample answers a different question, so they come from different runs rather than views of one: a
-// sentiment card of a run where the models cooled on one party and warmed to another, a refusal card that
-// splits by identity, the words card of that same run — the answer that the refusal grid no longer gives when
-// nothing is refused — a sheet of replies where the marks actually land, the ends of every reply in a run with
-// several wordings and enough models for the sheet to read across as well as down, and the keyword card of a
-// run where two models reached for a word on one wording and not the others. Every one is drawn through the
-// catalogue, at the defaults a run is drawn with, except where a sample says otherwise: no display names, so
-// the samples need no catalogue fetch.
-//
-//   file     the SVG under assets/samples/; the PNG beside it, named alike, is what the page shows
-//   run      the committed run it is drawn from
-//   kind     which image, one of src/images.js
-//   opts     what drawImage is told beyond its defaults
-//   measure  read the run by this measure rather than the one its eval asked for. Every reply is scored for
-//            refusal, keywords and sentiment as it lands whatever the eval measures, so the card of another
-//            measure is the same replies read the other way — what `llmscope run <eval> --type <measure>`
-//            draws, from replies already in hand rather than new ones.
+// refusal card that splits by identity, the words card of that same run — the answer that the refusal grid
+// no longer gives when nothing is refused — a sheet of replies where the marks actually land, the ends of
+// every reply in a run with several wordings and enough models for the sheet to read across as well as down,
+// and the keyword card of a run where two models reached for a word on one wording and not the others. Every
+// one is drawn through the catalogue, at the defaults a run is drawn with, except where a sample says
+// otherwise: no display names, so the samples need no catalogue fetch.
 export const SAMPLES = [
-  // The sentiment card: ten models, four parties swapped into one prompt, and one column that reads red down
-  // most of its length. The run measured keyword inclusion, so this is it read by its other measure.
-  { file: 'sentiment.svg', run: 'dbo50g', kind: 'card', measure: 'sentiment', opts: {} },
   // No title given, so the sample is the card a run draws by default: the prompt at the head, no finding stated.
   { file: 'card.svg', run: 'D5a3G9', kind: 'card', opts: {} },
   // The words card of the same run, so the page shows the two images one run leaves side by side. That run was
@@ -65,16 +52,10 @@ export async function loadSampleRun(id) {
   return run;
 }
 
-/**
- * The run read by `measure`, or as its eval ran it when none is given. A copy, so a run cached across samples
- * is not left measuring something else for the next one drawn from it.
- */
-const readBy = (run, measure) => (measure ? { ...run, spec: { ...run.spec, primary: measure } } : run);
-
 /** One sample as SVG text. `cache` holds loaded runs across samples drawn from the same one. */
 export async function drawSample(sample, cache = new Map()) {
   if (!cache.has(sample.run)) cache.set(sample.run, await loadSampleRun(sample.run));
-  const { svg, empty } = drawImage(sample.kind, readBy(cache.get(sample.run), sample.measure), sample.opts);
+  const { svg, empty } = drawImage(sample.kind, cache.get(sample.run), sample.opts);
   if (!svg) throw new Error(`${sample.file}: nothing to draw (${empty})`);
   return svg;
 }
