@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { ensureText } from '../src/text.js';
-import { SAMPLES, SAMPLES_DIR, pngName, drawSample } from '../scripts/samples.mjs';
+import { specId, normalizeSpec } from '../src/spec.js';
+import { ROOT, SAMPLES, SAMPLES_DIR, pngName, drawSample, loadSampleRun } from '../scripts/samples.mjs';
 
 // The landing page's images are committed, so a renderer change leaves them behind unless something notices.
 // This does: each sample is drawn again from the run committed beside it and has to come out byte for byte the
@@ -30,4 +31,20 @@ test('every sample has the PNG the page shows', async () => {
 test('the social card is drawn from the card sample and committed beside it', async () => {
   const og = await fs.stat(path.join(SAMPLES_DIR, 'og.png')).catch(() => null);
   assert.ok(og && og.size > 0, 'assets/samples/og.png is what a posted link unfurls into; scripts/build-samples.mjs draws it');
+});
+
+// The page names each sample twice, by hand: the PNG it shows, and the eval the sample was drawn from, linked
+// under its caption so a reader can run the thing they are looking at. Both have to keep up with SAMPLES, and
+// the eval has to be one the build ships, or the link answers with nothing on a static host.
+test('the landing page shows every sample and links it to the bundled eval it was drawn from', async () => {
+  const page = await fs.readFile(path.join(ROOT, 'site', 'src', 'layouts', 'Site.astro'), 'utf8');
+  for (const sample of SAMPLES) {
+    const png = pngName(sample.file);
+    assert.ok(page.includes(`src="/samples/${png}"`), `Site.astro does not show ${png}`);
+    assert.ok(page.includes(`href="/${sample.run}"`), `Site.astro does not link ${png} to /${sample.run}, the eval it was drawn from`);
+    const bundled = await fs.readFile(path.join(ROOT, 'evals', `${sample.run}.json`), 'utf8').catch(() => null);
+    assert.ok(bundled !== null, `evals/${sample.run}.json is missing: the link under ${png} would answer with nothing on a static host`);
+    const run = await loadSampleRun(sample.run);
+    assert.equal(await specId(normalizeSpec(JSON.parse(bundled))), await specId(normalizeSpec(run.spec)), `evals/${sample.run}.json is not the eval ${png} was drawn from`);
+  }
 });
