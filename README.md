@@ -75,8 +75,8 @@ sentiment service are CLI-side settings; a results file loaded into the page kee
 Runs are saved in that browser and reopen from the picker in the header; *Open…* beside it takes an eval ID
 from a card, a share link, or a results file from disk.
 
-Two dependencies are optional. Without `@resvg/resvg-js` you get SVG cards instead of PNG, and without
-`sentiment` the sentiment check is unavailable; everything else works. `@napi-rs/canvas` is required but ships
+One dependency is optional: without `@resvg/resvg-js` you get SVG cards instead of PNG; everything else works.
+`@napi-rs/canvas` is required but ships
 prebuilt for common platforms — if yours has no binary, llmscope says so on startup and estimates text widths
 instead of measuring them, which moves some line breaks on the images.
 
@@ -221,13 +221,14 @@ eval's ID is content-addressed — the same prompt, slots, models and settings a
 the spec's file in `evals/`, so the recipe is saved once however often it is run. `llmscope results <eval id>`
 opens the newest run of that eval; the listing shows which eval each run came from.
 
-**Where things go.** Every run writes its results and three images, and saves the recipe:
+**Where things go.** Every run writes its results and four images, and saves the recipe:
 
 | file | what |
 |---|---|
 | `evals/<eval id>.json` | the spec: prompt, slot values, models, settings. Rerun with `llmscope run evals/<eval id>.json`. |
 | `out/<id>.results.json` | every response: model, filled-in prompt, slot value, run, full text, tokens (prompt, reply, and total), and each verdict (refused and why, keyword hits, sentiment). |
 | `out/<id>.png`, `out/<id>.svg` | the card. `llmscope render out/<id>.results.json` rebuilds it without new API calls, and `llmscope render --stale` rebuilds every run in `out/` whose images were drawn before the current renderer. |
+| `out/<id>.words.png`, `.svg` | the words card: one cloud per wording, the words its replies were scored on, sized by how many replies used them and green or red by which way they scored, with the prompt's own words left out. Counted against the list the run was scored with — AFINN-165 unless the eval chose the built-in list — and `llmscope render <id> --lexicon builtin` (or `afinn`) re-makes it against the other. |
 | `out/<id>.responses.svg`, `.png` | every reply on one 4096 px image, one reply per line under a heading per group, each opening with its model's mark and name. The card plus this sheet show a viewer everything. The SVG is the one that opens: it is clickable (see below) and it stays sharp however far in you zoom; the PNG is for posting. |
 | `out/<id>.ends.svg`, `.png` | the first and last sentence of every reply on one image, set out the same way: how each model opens and where it lands, side by side. `llmscope sheet <id> --excerpt ends` re-makes it. |
 | `out/<id>.keywords.png`, `.svg` | the keyword card, written by any run that marks words: one line per model and wording, with each marked word the model replied with in a red chip, its rate, and a dot per response. `llmscope keywords <id>` re-makes it. |
@@ -316,8 +317,21 @@ longer instead of more numerous (a 400-word prompt lands at about 17 words a lin
 ends in `…`. That is the same behaviour as before the measure rule — the rule changes the sizing only where there is
 slack, and there it makes the heading shorter, not taller.
 
+**Words image.** Every run writes it beside the card (`llmscope render <id>` re-makes it; the browser shows it
+under Words). One cloud per wording, in the card's column order: the words the wording's replies were scored
+on, sized by the share of replies that used them — a word half the replies used is full size in any panel, so
+size compares across panels — and green or red by which way they scored, after negation. Words the prompt itself
+contains are left out, so a model told to "write two sentences" does not score "sentences" every time, and
+refused replies and errors are not counted. Each panel is fitted by shrinking its type until every word has a
+place; one that still overflows at the smallest readable size draws the words the most replies used and counts
+the rest in its corner. It is counted against the list the replies were scored with — AFINN-165 by default, or
+the built-in threat/warmth list when the eval chose it with `--sentiment builtin` — and `--lexicon builtin|afinn`
+on `run` or `render` counts it against the other one, from the saved replies, with no new API calls. Sentiment is
+scored the same way in the browser and the CLI: one rule over either list, a negator up to two words back
+flipping a word and halving it, so a run's numbers and its words card agree.
+
 **Responses image.** Every run writes it next to the card (`llmscope sheet <id>` re-makes it; the browser has a
-Card / Keywords / Sentences / Responses toggle over the preview, and under Responses the same *how much of each
+Card / Words / Keywords / Sentences / Responses toggle over the preview, and under Responses the same *how much of each
 reply* choices, the ends of every reply downloading as `.ends` the way the CLI names them). It puts every reply
 of a run on one 4096 × 4096 image, under the same header as the card, so the two images together show a viewer
 everything.
@@ -774,6 +788,8 @@ src/render.js        SVG card
 src/sheet.js         responses sheet (every reply on one image)
 src/palette.js       per-model OKLCH colors (detail)
 src/render-share.js  share card: every prompt as headline (default) or the finding, one number per cell
+src/render-words.js  words card: one cloud per wording, the words replies were scored on, sized by how many used them
+src/words.js         those words counted per wording against either list, from the saved replies
 src/images.js        the images a run is drawn as: one list the CLI writes from, the browser offers, the samples draw through
 src/logos.js         provider marks, generated by scripts/build-logos.mjs from @lobehub/icons-static-svg
 assets/logos/        the white monochrome marks, keyed by OpenRouter provider prefix
@@ -784,7 +800,7 @@ src/keyword-sets.js  named sets in keywords/, and every keyword batch on hand
 src/input-recall.js  the text prompt that recalls: up-arrow history, ctrl-r picker
 keywords/            named keyword batches, one JSON file per set (@name)
 src/providers/       openrouter.js (BYOK, retries, key check), mock.js (deterministic fake)
-src/checks/          refusal.js, keywords.js, sentiment.js (pluggable), judge.js
+src/checks/          refusal.js, keywords.js, sentiment.js (AFINN-165 and a built-in threat/warmth list, scored alike; pluggable), judge.js
 bin/llmscope.js      interactive menu + wizard, one-line flags, static server
 site/src/pages/      the website: landing page, key prompt and app in one Astro page
 web/app.js style.css  that page's code and dress, built by Astro into one bundle, run by the CLI unbuilt

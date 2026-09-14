@@ -118,6 +118,8 @@ button:disabled, .btn:disabled { opacity: .42; cursor: not-allowed; }
 .shots img { display: block; width: 100%; aspect-ratio: 1; object-fit: contain; }
 .shots figcaption { margin-top: 12px; font-size: 14px; color: var(--muted); }
 .shots figcaption b { color: var(--text); }
+/* An odd count leaves the last figure alone on its row: centre it at the width of the others rather than let it sit in the corner. */
+.shots figure:last-child:nth-child(odd) { grid-column: 1 / -1; width: calc(50% - 11px); margin: 0 auto; }
 /* What a run keeps behind the images, without an image of its own: two notes in the same dress as the features. */
 .extras { display: grid; grid-template-columns: repeat(2, 1fr); gap: 22px; margin-top: 22px; }
 

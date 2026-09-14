@@ -50,14 +50,14 @@
     "node": ">=20"
   },
   "optionalDependencies": {
-    "@resvg/resvg-js": "^2.6.2",
-    "sentiment": "^5.0.2"
+    "@resvg/resvg-js": "^2.6.2"
   },
   "dependencies": {
     "@chenglou/pretext": "^0.0.9",
     "@inquirer/prompts": "^8.7.1",
     "@napi-rs/canvas": "^1.0.8",
-    "dejavu-fonts-ttf": "^2.37.3"
+    "dejavu-fonts-ttf": "^2.37.3",
+    "sentiment": "^5.0.2"
   },
   "devDependencies": {
     "@lobehub/icons-static-svg": "^1.95.0",
