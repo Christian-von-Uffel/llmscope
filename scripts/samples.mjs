@@ -21,28 +21,29 @@ export const RUNS_DIR = path.join(SAMPLES_DIR, 'runs');
 export const PNG_WIDTH = 1200;
 export const pngName = (file) => file.replace(/\.svg$/, '.png');
 
-// Each sample answers a different question, so they come from different runs rather than views of one: a
-// refusal card that splits by identity, the words card of that same run — the answer that the refusal grid
-// no longer gives when nothing is refused — a sheet of replies where the marks actually land, the ends of
-// every reply in a run with several wordings and enough models for the sheet to read across as well as down,
-// and the keyword card of a run where two models reached for a word on one wording and not the others. Every
-// one is drawn through the catalogue, at the defaults a run is drawn with, except where a sample says
-// otherwise: no display names, so the samples need no catalogue fetch.
+// Each sample answers a different question, so they come from different runs rather than views of one: the
+// keyword card of a run where two models reached for a word on one wording and not the others, the words card
+// of that same run — the answer the refusal grid no longer gives when nothing is refused — a refusal card that
+// splits by identity, a sheet of replies where the marks actually land, and the ends of every reply in a run
+// with several wordings and enough models for the sheet to read across as well as down. Every one is drawn
+// through the catalogue, at the defaults a run is drawn with, except where a sample says otherwise: no display
+// names, so the samples need no catalogue fetch. The page shows them in this order.
 export const SAMPLES = [
-  // No title given, so the sample is the card a run draws by default: the prompt at the head, no finding stated.
-  { file: 'card.svg', run: 'D5a3G9', kind: 'card', opts: {} },
-  // The words card of the same run, so the page shows the two images one run leaves side by side. That run was
-  // scored with the built-in list before AFINN-165 became the default, so the sample names the default list
-  // rather than following the run, as `llmscope render D5a3G9 --lexicon afinn` would.
-  { file: 'words.svg', run: 'D5a3G9', kind: 'words', opts: { lexicon: 'afinn' } },
-  // Only the replies that matched, cut to the sentences that matched: the marks, where they land.
-  { file: 'responses.svg', run: 'dbo50g', kind: 'responses', opts: { size: 1400, select: 'matched', excerpt: 'matches' } },
-  // The image every run writes beside the full sheet, as `llmscope sheet <id> --excerpt ends` re-makes it.
-  { file: 'ends.svg', run: 'GK1zvv', kind: 'ends', opts: { size: 1400 } },
   // The keyword card: each model, the wording that made it reply with a marked word, the word itself, and a dot
   // per response. The run marks four words — the eval's three and "myth", added after reading the replies — and the card
   // is drawn over all four, as `llmscope keywords mwbXAp` draws it.
   { file: 'keywords.svg', run: 'mwbXAp', kind: 'keywords', opts: {} },
+  // The words card of the same run, so the page shows two images of one run side by side: the words each
+  // wording drew, with about twenty replies behind every panel. That run was scored with the built-in list
+  // before AFINN-165 became the default, so the sample names the default list rather than following the run, as
+  // `llmscope render mwbXAp --lexicon afinn` would.
+  { file: 'words.svg', run: 'mwbXAp', kind: 'words', opts: { lexicon: 'afinn' } },
+  // No title given, so the sample is the card a run draws by default: the prompt at the head, no finding stated.
+  { file: 'card.svg', run: 'D5a3G9', kind: 'card', opts: {} },
+  // Only the replies that matched, cut to the sentences that matched: the marks, where they land.
+  { file: 'responses.svg', run: 'dbo50g', kind: 'responses', opts: { size: 1400, select: 'matched', excerpt: 'matches' } },
+  // The image every run writes beside the full sheet, as `llmscope sheet <id> --excerpt ends` re-makes it.
+  { file: 'ends.svg', run: 'GK1zvv', kind: 'ends', opts: { size: 1400 } },
 ];
 
 /** A sample's run, scored by the current rules, the way every command loads one. */
