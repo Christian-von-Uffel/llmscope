@@ -409,7 +409,7 @@ function sortMode(args) {
   return mode;
 }
 
-/** --lexicon afinn|builtin: the list the words card counts against. Unset, the card follows the run (see src/words.js). */
+/** --lexicon afinn|builtin: the list the word cloud counts against. Unset, the card follows the run (see src/words.js). */
 function lexiconMode(args) {
   if (args.lexicon === undefined || args.lexicon === true) return null;
   const mode = String(args.lexicon);
@@ -541,7 +541,7 @@ async function writeOutputs(run, { outDir = 'out', out, svg, png, url, title, hi
     svg: svg || path.join(outDir, `${run.id}${imageSuffix('card')}.svg`),
     png: png === false ? null : png || path.join(outDir, `${run.id}${imageSuffix('card')}.png`),
     mode,
-    words: null,
+    wordcloud: null,
     keywords: null,
   };
   await fs.writeFile(paths.json, JSON.stringify(run, null, 2));
@@ -592,9 +592,9 @@ const WRITERS = {
   },
   // One cloud per wording: the words replies were scored on. Every run writes it, counted against the list the
   // run was scored with; --lexicon counts it against the other one.
-  async words(run, paths, { a, png, url, title, lexicon }) {
-    const card = await writeImage(run, paths.json, 'words', { a, url, png, title, lexicon });
-    paths.words = card.path;
+  async wordcloud(run, paths, { a, png, url, title, lexicon }) {
+    const card = await writeImage(run, paths.json, 'wordcloud', { a, url, png, title, lexicon });
+    paths.wordcloud = card.path;
     return card;
   },
   // The rate of each marked word by group and by model. The catalogue offers it only when there are words.
@@ -744,7 +744,7 @@ async function execute(inputSpec, args = {}) {
   }
   void keywords;
   console.log(`\nshare: ${bold(plan.spec.share_base + run.id)}   rerun: llmscope run ${target.file}`);
-  console.log(`results:   ${paths.json}   ${dim(`browse: llmscope results ${run.id}`)}\ncard:      ${paths.png || paths.svg}   ${dim(`title: ${paths.mode} · post this one`)}\nwords:     ${paths.words}   ${dim('one cloud per wording: the words replies were scored on, sized by how many used them')}\nresponses: ${paths.sheet}   ${dim(`${sheet.replies} replies · ${sheet.note}${sheet.highlight.length ? ` · highlighting ${sheet.highlight.join(', ')}` : ''} · ${SHEET_LINKS}`)}\nends:      ${paths.ends}   ${dim('the first and last sentence of every reply · how each model opens and where it lands')}${paths.keywords ? `\nkeywords:  ${paths.keywords}   ${dim(`${keywordSummary(analysis, run)} · post this beside the card`)}` : ''}\nalt text:  ${paths.share}   ${dim('alt text and caption to paste with the card')}`);
+  console.log(`results:   ${paths.json}   ${dim(`browse: llmscope results ${run.id}`)}\ncard:      ${paths.png || paths.svg}   ${dim(`title: ${paths.mode} · post this one`)}\nwordcloud: ${paths.wordcloud}   ${dim('one cloud per wording: the words replies were scored on, sized by how many used them')}\nresponses: ${paths.sheet}   ${dim(`${sheet.replies} replies · ${sheet.note}${sheet.highlight.length ? ` · highlighting ${sheet.highlight.join(', ')}` : ''} · ${SHEET_LINKS}`)}\nends:      ${paths.ends}   ${dim('the first and last sentence of every reply · how each model opens and where it lands')}${paths.keywords ? `\nkeywords:  ${paths.keywords}   ${dim(`${keywordSummary(analysis, run)} · post this beside the card`)}` : ''}\nalt text:  ${paths.share}   ${dim('alt text and caption to paste with the card')}`);
   // Printed, not just written: the alt field is filled in at the moment of posting, and that is the terminal.
   console.log(`\n${bold('alt text')} ${dim('(paste into the image description field)')}\n${altText(analysis, { names: namesMap() })}`);
   if (TTY && !args.yes) await afterRun(run, paths, { outDir: args['out-dir'] || 'out', specSaved: saved, analysis, args });
@@ -1718,7 +1718,7 @@ async function afterRun(run, paths, { outDir = 'out', specSaved = false, analysi
       choices: [
         { value: 'card', name: 'Open the results card', disabled: paths.png ? false : '(no PNG)' },
         { value: 'title', name: mode === 'finding' ? 'Switch the results card heading to the prompts' : 'Switch the results card heading to the finding (state the result)' },
-        { value: 'words', name: 'Open the words card', description: `one cloud per wording: the words replies were scored on, sized by how many replies used them · written by every run · later: llmscope render ${run.id} --lexicon ${lexiconFor(run) === 'afinn' ? 'builtin' : 'afinn'} for the other word list`, disabled: paths.words?.endsWith('.png') ? false : paths.words ? '(no PNG)' : '(not written)' },
+        { value: 'wordcloud', name: 'Open the word cloud', description: `one cloud per wording: the words replies were scored on, sized by how many replies used them · written by every run · later: llmscope render ${run.id} --lexicon ${lexiconFor(run) === 'afinn' ? 'builtin' : 'afinn'} for the other word list`, disabled: paths.wordcloud?.endsWith('.png') ? false : paths.wordcloud ? '(no PNG)' : '(not written)' },
         { value: 'sheet', name: 'Open the model responses card', description: `every reply on one 4096px image · ${SHEET_LINKS}` },
         { value: 'edit', name: 'Open the responses in your text editor', description: `every reply as text, to copy, cut and paste · $VISUAL or $EDITOR · later: llmscope results ${run.id} --edit` },
         { value: 'sentences', name: 'Open the keyword matches in context card', description: `how many matches each wording drew and from which models, each shown in its sentence · later: llmscope sentences ${run.id} [--sort model|keyword]` },
@@ -1889,7 +1889,7 @@ async function afterRun(run, paths, { outDir = 'out', specSaved = false, analysi
     if (choice === 'folder') openFile(path.resolve(path.dirname(paths.json)));
     if (choice === 'sheet') openSheet(paths.sheet);
     if (choice === 'kwcard') openFile(paths.keywords);
-    if (choice === 'words') openFile(paths.words);
+    if (choice === 'wordcloud') openFile(paths.wordcloud);
   }
 }
 
@@ -2275,7 +2275,7 @@ async function cmdSets(args) {
  * Every module that puts marks on an image. An image is only as current as the newest of these: a fix to the way
  * a title is drawn leaves every card drawn before it a version behind, and nothing about the file says so.
  */
-const RENDERER_SOURCES = ['images.js', 'render.js', 'render-share.js', 'render-keywords.js', 'render-words.js', 'words.js', 'checks/sentiment.js', 'sheet.js', 'sentences.js', 'keyword-grid.js', 'text.js', 'analyze.js', 'logos.js', 'palette.js'];
+const RENDERER_SOURCES = ['images.js', 'render.js', 'render-share.js', 'render-keywords.js', 'render-wordcloud.js', 'words.js', 'checks/sentiment.js', 'sheet.js', 'sentences.js', 'keyword-grid.js', 'text.js', 'analyze.js', 'logos.js', 'palette.js'];
 
 /** When the renderer last changed, in epoch ms. */
 async function rendererStamp() {
@@ -2348,7 +2348,7 @@ async function cmdRender(args) {
   await models({ quiet: true }); // display names for the share card; fine without network
   const { analysis, paths } = await writeOutputs(run, { outDir: path.dirname(file), out: args.out || file, svg: args.svg, png: args.png === 'none' ? false : args.png, url: args.url, title: args.title, highlight: highlightTerms(args), excerpt: excerptMode(args), sort: sortMode(args), lexicon: lexiconMode(args) });
   printSummary(analysis);
-  console.log(`card:      ${paths.png || paths.svg}   ${dim(`title: ${paths.mode} · post this one`)}\nwords:     ${paths.words}   ${dim('one cloud per wording: the words replies were scored on, sized by how many used them')}\nresponses: ${paths.sheet}   ${dim(SHEET_LINKS)}\nends:      ${paths.ends}   ${dim('the first and last sentence of every reply')}\nalt text:  ${paths.share}`);
+  console.log(`card:      ${paths.png || paths.svg}   ${dim(`title: ${paths.mode} · post this one`)}\nwordcloud: ${paths.wordcloud}   ${dim('one cloud per wording: the words replies were scored on, sized by how many used them')}\nresponses: ${paths.sheet}   ${dim(SHEET_LINKS)}\nends:      ${paths.ends}   ${dim('the first and last sentence of every reply')}\nalt text:  ${paths.share}`);
 }
 
 async function cmdId(args) {
@@ -2594,7 +2594,7 @@ const HELP = `llmscope — deterministic LLM bias evals (bring your own OpenRout
                                 overrides as run, so a variation can be read before it is paid for
   llmscope render <id|results.json> [--title prompt] [--lexicon builtin]
                                 re-render a run's images from saved results (no API calls). Every run writes a
-                                words card beside the results card: one cloud per wording, the words its replies
+                                word cloud beside the results card: one cloud per wording, the words its replies
                                 were scored on, sized by how many replies used them and green or red by which way
                                 they scored, with the prompt's own words left out. It is counted against the list
                                 the run was scored with — AFINN-165 unless the eval chose the built-in

@@ -9,7 +9,7 @@ import { analyze } from '../src/analyze.js';
 import { normalizeSpec, variantCombos, comboKey, comboLabel } from '../src/spec.js';
 import { cloudWords, echoedWords, lexiconFor } from '../src/words.js';
 import { LEXICONS, DEFAULT_LEXICON, analyzeSentiment, setSentimentAnalyzer, resetSentimentAnalyzer } from '../src/checks/sentiment.js';
-import { wordsFinding, layoutCloud, WORD_MIN, WORD_MAX } from '../src/render-words.js';
+import { wordsFinding, layoutCloud, WORD_MIN, WORD_MAX } from '../src/render-wordcloud.js';
 
 await ensureText();
 const provider = createMockProvider();
@@ -94,22 +94,22 @@ test('the list a cloud counts against: asked for, else the run\'s own, else AFIN
   assert.ok(builtin.clouds.flatMap((c) => c.words).every((w) => w.word in LEXICONS.builtin.words));
 });
 
-test('the words card draws from the catalogue, names its list, and draws the same card twice', () => {
-  const drawn = drawImage('words', run);
-  assert.equal(drawn.kind, 'words');
+test('the word cloud draws from the catalogue, names its list, and draws the same card twice', () => {
+  const drawn = drawImage('wordcloud', run);
+  assert.equal(drawn.kind, 'wordcloud');
   assert.ok(drawn.svg.startsWith('<svg') && drawn.svg.includes('width="1600"'));
   assert.equal(drawn.lexicon, 'afinn');
-  assert.ok(drawn.svg.includes('llmscope · refusal rate · words'), 'the brand line says which image it is');
+  assert.ok(drawn.svg.includes('llmscope · word cloud') && !drawn.svg.includes('refusal rate'), 'the top line names the image, not the measure the run scored');
   assert.ok(drawn.svg.includes('>Black<') && drawn.svg.includes('>white<'), 'a panel per wording');
   assert.ok(drawn.svg.includes('AFINN-165') && drawn.svg.includes('>scored positive<') && drawn.svg.includes('>scored negative<'));
   assert.equal(drawn.dropped, 0, 'every word found a place');
   assert.ok(drawn.drawn > 0);
-  assert.equal(drawImage('words', run).svg, drawn.svg, 'deterministic');
-  const other = drawImage('words', run, { lexicon: 'builtin' });
+  assert.equal(drawImage('wordcloud', run).svg, drawn.svg, 'deterministic');
+  const other = drawImage('wordcloud', run, { lexicon: 'builtin' });
   assert.ok(other.svg.includes('built-in lexicon') && other.svg.includes('>warmth / safety word<') && other.svg.includes('>threat / discomfort word<'), 'the other list, with a key in its own terms');
   assert.notEqual(other.svg, drawn.svg);
-  assert.throws(() => drawImage('words', run, { lexicon: 'vader' }), /no such lexicon/);
-  const finding = drawImage('words', run, { title: 'finding' });
+  assert.throws(() => drawImage('wordcloud', run, { lexicon: 'vader' }), /no such lexicon/);
+  const finding = drawImage('wordcloud', run, { title: 'finding' });
   const headline = wordsFinding(cloudWords(run)).headline;
   assert.ok(finding.svg.includes(esc(headline.split(' ').slice(0, 4).join(' '))), `the finding heading is the sentence wordsFinding writes: ${headline}`);
   assert.notEqual(finding.svg, drawn.svg);
@@ -128,7 +128,7 @@ test('the finding sentence names the wording that leaned on negative words, and 
 
 test('a panel with nothing to draw says so', () => {
   const refused = handRun('Is the {place} nice?', { place: { park: [{ text: 'I cannot help.', refused: true }], street: [{ text: 'It is a place with trees.' }] } });
-  const svg = drawImage('words', refused).svg;
+  const svg = drawImage('wordcloud', refused).svg;
   assert.ok(svg.includes('no answered replies'), 'every reply refused');
   assert.ok(svg.includes('no scored words in 1 reply'), 'answered, but nothing the list scores');
 });
