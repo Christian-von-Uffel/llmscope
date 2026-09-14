@@ -4,14 +4,36 @@
     {
       "name": "llmscope-dev",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--", "--port", "4321"],
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--",
+        "--port",
+        "4321"
+      ],
       "port": 4321
     },
     {
       "name": "llmscope",
       "runtimeExecutable": "node",
-      "runtimeArgs": ["bin/llmscope.js", "serve", "--port", "5173"],
+      "runtimeArgs": [
+        "bin/llmscope.js",
+        "serve",
+        "--port",
+        "5173"
+      ],
       "port": 5173
+    },
+    {
+      "name": "llmscope-api",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "node_modules/wrangler/bin/wrangler.js",
+        "dev",
+        "--port",
+        "8787"
+      ],
+      "port": 8787
     }
   ]
 }

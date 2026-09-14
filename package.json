@@ -43,6 +43,10 @@
     "preview": "astro preview",
     "prepare": "[ -n \"$CI\" ] || npm run build || echo 'llmscope: the website did not build, so llmscope serve has nothing to serve. The CLI itself is unaffected.'",
     "serve": "node bin/llmscope.js serve --port 5173",
+    "api": "wrangler dev --port 8787",
+    "db": "wrangler d1 migrations apply llmscope --local",
+    "db:remote": "wrangler d1 migrations apply llmscope --remote",
+    "deploy": "npm run build && wrangler deploy",
     "demo": "node bin/llmscope.js run examples/identity-swap.json --provider mock --yes",
     "start": "node bin/llmscope.js"
   },
@@ -61,6 +65,7 @@
   },
   "devDependencies": {
     "@lobehub/icons-static-svg": "^1.95.0",
-    "astro": "^7.3.2"
+    "astro": "^7.3.2",
+    "wrangler": "^4.131.1"
   }
 }

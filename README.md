@@ -64,7 +64,9 @@ set your own spending limits.
 
 **Browser UI.** `llmscope serve` (or `npm run serve` from a clone) puts the website on
 http://localhost:5173. It is the same build the hosted site runs and the same engine the CLI runs, so nothing
-is written twice for the browser. There the key goes straight from the page to OpenRouter and is never sent to
+is written twice for the browser. A run you finish there is saved to the site's registry as it would be on the
+site, so the address on its card opens for anyone; `--registry none` keeps runs in the browser instead. There
+the key goes straight from the page to OpenRouter and is never sent to
 the local server; it is kept only if you tick *Remember*, which stores it in the browser's own storage for that
 origin. From a clone the site has to be built once with `npm run build` before `serve` has anything to serve;
 an install from the repository builds it for you.
@@ -72,7 +74,9 @@ The page opens on a landing page, asks for the key once, and then shows the form
 fields a run actually decides — prompt, slot values, measure, models, repeats — and takes `src/spec.js` defaults
 for the rest, so the reply cap, thinking budget, reasoning effort, disparity threshold, seed, system prompt and
 sentiment service are CLI-side settings; a results file loaded into the page keeps whatever it was run with.
-Runs are saved in that browser and reopen from the picker in the header; *Open…* beside it takes an eval ID
+Runs are saved in that browser and reopen from the picker in the header; on the hosted site each finished run
+is also saved to the site's registry under its id, which is what makes the address on its card open for anyone
+(see [The registry behind the site](#the-registry-behind-the-site)). *Open…* beside the picker takes an eval ID
 from a card, a share link, or a results file from disk.
 
 One dependency is optional: without `@resvg/resvg-js` you get SVG cards instead of PNG; everything else works.
@@ -130,17 +134,19 @@ selector resolves to, with dates and prices, before you spend anything.
 memory for that one process, so there is no cache to clear and no update step: a model listed today is
 selectable today, and one OpenRouter retires stops appearing. Selectors resolve against that same live list,
 which is why `--models gemini` picks up a new Gemini tier without any change here. The one hardcoded list is
-the frontier default used when a run names no models and you have not picked a set before, and it self-heals — a default missing from the live
-catalogue is replaced by that provider's newest model. If the fetch fails, llmscope says so and falls back to
+the default set used when a run names no models and you have not picked a set before: the strongest model from each
+big lab at or under $10 per million output tokens, which keeps the frontier flagships at $50 a tick away rather than
+ticked. It self-heals — a default missing from the live catalogue is replaced by that provider's newest model under
+the same price cap. If the fetch fails, llmscope says so and falls back to
 those defaults, and selectors cannot expand until it succeeds. Eval files record concrete model IDs, so an old
 eval can name a retired model; rerun it with `--models` to move it forward.
 
-**Reusing a set of models.** A new eval starts from the last set you picked, or the frontier defaults if you
+**Reusing a set of models.** A new eval starts from the last set you picked, or the default models if you
 have not picked one yet. At the guided eval's model prompt — and at *Type selectors…* when changing models —
 the **up-arrow** walks earlier sets and **ctrl-r** opens a picker over them, with *Pick from the list…* still
 ticking models from the live catalogue. The same box accepts a family, a provider, a glob or an exact ID. It
 holds every set this project has: what was picked lately, the models of every eval in `evals/` and `examples/`,
-the models each run in `out/` actually sent, and the live frontier defaults (last, unless you used them).
+the models each run in `out/` actually sent, and the live default models (last, unless you used them).
 
 Whatever is accepted is remembered in `~/.config/llmscope/config.json`. Down-arrow walks back out of the history
 to the text that was already in the box. In the browser UI the "This set" box drops down earlier selections and
@@ -221,13 +227,14 @@ eval's ID is content-addressed — the same prompt, slots, models and settings a
 the spec's file in `evals/`, so the recipe is saved once however often it is run. `llmscope results <eval id>`
 opens the newest run of that eval; the listing shows which eval each run came from.
 
-**Where things go.** Every run writes its results and four images, and saves the recipe:
+**Where things go.** Every run writes its results and five images, and saves the recipe:
 
 | file | what |
 |---|---|
 | `evals/<eval id>.json` | the spec: prompt, slot values, models, settings. Rerun with `llmscope run evals/<eval id>.json`. |
 | `out/<id>.results.json` | every response: model, filled-in prompt, slot value, run, full text, tokens (prompt, reply, and total), and each verdict (refused and why, keyword hits, sentiment). |
 | `out/<id>.png`, `out/<id>.svg` | the card. `llmscope render out/<id>.results.json` rebuilds it without new API calls, and `llmscope render --stale` rebuilds every run in `out/` whose images were drawn before the current renderer. |
+| `out/<id>.refusals.png`, `.svg` | the refusals page: every refused reply cut to the sentence it declined in, under the wording that drew it, with the phrase that made it a refusal marked in red — what the card's rate looked like. A wording nobody declined keeps its heading and says so. Skipped, with a note, when nothing in the run was refused. |
 | `out/<id>.wordcloud.png`, `.svg` | the word cloud: one cloud per wording, the words its replies were scored on, sized by how many replies used them and green or red by which way they scored, with the prompt's own words left out. Counted against the list the run was scored with — AFINN-165 unless the eval chose the built-in list — and `llmscope render <id> --lexicon builtin` (or `afinn`) re-makes it against the other. |
 | `out/<id>.responses.svg`, `.png` | every reply on one 4096 px image, one reply per line under a heading per group, each opening with its model's mark and name. The card plus this sheet show a viewer everything. The SVG is the one that opens: it is clickable (see below) and it stays sharp however far in you zoom; the PNG is for posting. |
 | `out/<id>.ends.svg`, `.png` | the first and last sentence of every reply on one image, set out the same way: how each model opens and where it lands, side by side. `llmscope sheet <id> --excerpt ends` re-makes it. |
@@ -250,6 +257,7 @@ llmscope results <id> --edit           # write the replies to a text file and op
 llmscope results <id> --variant white --text   # only what the models said, for a word cloud or a sentiment tool
 llmscope results <id> --csv            # the replies listed, as out/<id>.csv, for a spreadsheet
 llmscope results <id> --matched --json # the replies listed, as JSON on stdout, for jq or a notebook
+llmscope publish <id>                  # save the run to llmscope.dev, so the address on its card opens for anyone
 ```
 
 The list gives each run the three things that tell two evals apart — the prompt as it was worded, the keywords
@@ -257,18 +265,32 @@ being matched, and the models asked — because the headline verdicts read alike
 refused") across runs that were asking quite different questions. Past eight saved runs, the menu's *Browse
 past results* picker filters as you type over those same fields.
 
-In the browser, the response table sits under the card, "Save results" downloads the same JSON, "Share link"
-copies a link that opens the eval set up the same way, and *Open…* in the header loads a saved results file. Every
-download is named for the run on show, the way the files in `out/` are, so two runs of one eval never save over
-each other, and an image downloaded after the form was edited is still named for the run it draws. The
-prompt box is editable after a load, so a saved eval can be reworded in place, and the slots under it re-derive
-as you type. Its model box searches the whole catalogue, not just the
-pre-selected flagships — type `gemini` and *Select all 15* to run the family, or add one by name in the field
-below the list.
+In the browser, the results panel is read by tabs — **Refusals**, **Keywords**, **Sentiment** when that was
+measured, **Word cloud** and **Responses** — and under each tab a button per image the run draws for it, so
+what the frame shows is always an image and always what SVG / PNG download. **Table** is the results card,
+every model by every wording, under the tab of what the eval measured; **Matches** is the keyword card, which
+model replied with which marked word for which wording; **Sentences** is the page of them — under Refusals the
+sentence each refused reply declined with, its refusing phrase marked in red, and under Keywords every sentence
+a marked word turned up in. The response
+table sits under the panel, "Save results" downloads the same JSON, "Share link" copies a link that opens the
+eval set up the same way, and *Open…* in the header loads a saved results file. Every download is named for
+the run on show, the way the files in `out/` are, so two runs of one eval never save over each other, and an
+image downloaded after the form was edited is still named for the run it draws. The prompt box is editable
+after a load, so a saved eval can be reworded in place, and the slots under it re-derive as you type. Its model
+box searches the whole catalogue, not just the pre-selected flagships — type `gemini` and *Select all 15* to run
+the family, or add one by name in the field below the list.
+
+**Addresses.** A run on show is at `llmscope.dev/<id>`, the address its card prints, so the bar can be copied as
+a link; someone who opens it sees the card and what the run asked, and can run it as it is or change it first.
+**New eval** in the header — `llmscope.dev/new` — is the form, empty, with your models still ticked: a run
+opened from a card is otherwise one edit from being that eval changed, and this makes it one click from being
+a different eval.
 
 **The response table.** It asks the same two questions the responses image asks, and takes the same answers.
-*Which replies*: every one, only refusals, or only the ones that included the keywords. *How much of each*: the
-whole reply, its first and last sentence, or only the sentences a marked word landed in. The words in the marking
+*Which replies*: every one, only refusals, or only the ones that included the keywords. *How much of each*:
+first and last sentences by default — the quickest read of how a model answered — or the full text, or only
+the sentences a marked word landed in; the choice is made over the Responses tab and the table follows it, and
+a click on a row opens the whole reply. The words in the marking
 box beside the tabs are marked in the table too, on the same amber block the image uses, so narrowing to the
 replies that matched and cutting them down to the sentences that matched read as one thing — the word, in the
 sentence the model built around it. Narrowing is presentation, like marking: *only replies that included the
@@ -332,9 +354,9 @@ on `run` or `render` counts it against the other one, from the saved replies, wi
 scored the same way in the browser and the CLI: one rule over either list, a negator up to two words back
 flipping a word and halving it, so a run's numbers and its word cloud agree.
 
-**Responses image.** Every run writes it next to the card (`llmscope sheet <id>` re-makes it; the browser has a
-Card / Word cloud / Keywords / Sentences / Responses toggle over the preview, and under Responses the same *how much of each
-reply* choices, the ends of every reply downloading as `.ends` the way the CLI names them). It puts every reply
+**Responses image.** Every run writes it next to the card (`llmscope sheet <id>` re-makes it; in the browser it
+is the **Responses** tab, with the same *how much of each reply* choices — first and last sentences first — the
+ends of every reply downloading as `.ends` the way the CLI names them). It puts every reply
 of a run on one 4096 × 4096 image, under the same header as the card, so the two images together show a viewer
 everything.
 It never paginates and never trims: the text size clamps, up or down, to the largest at which everything fits,
@@ -392,7 +414,7 @@ narrower, so each run used to end short of where the next one starts, and the sl
 line is cut into more than one run — which is at every keyword mark. So each run carries `textLength`: the width
 it was measured at. The viewer's font is fitted to our measure rather than our layout being left to its font, and
 where DejaVu is present the pin is the natural width and nothing moves. `src/text.js` holds the one
-implementation all four images pass through; `test/text.test.js` checks every run on a finished card is pinned to
+implementation every image passes through; `test/text.test.js` checks every run on a finished card is pinned to
 what it draws, and `test/sheet.test.js` that a marked word still sits one space after the word in front of it.
 
 **Outcome badges.** Each badge carries a mark as well as a colour — a red cross for refused, a green tick for
@@ -435,8 +457,10 @@ the same list.
 Sentences split on line breaks as well as on full stops, so a bulleted reply keeps its bullets, and `e.g.` or
 `U.S.` does not start a new one. Every elision is marked `…` wherever it falls — a dropped opening, a gap between
 kept sentences, a dropped tail — so an excerpt can never be misread as a whole reply, and the note under the
-legend says which mode drew the page. A reply with no match at all still appears, as a bare `…`: that a model
-said nothing matching is part of the picture. `matches` uses the same terms the sheet highlights, so it composes
+legend says which mode drew the page. Under `matches` a reply with no match is left off, and each model with no
+matching reply in a wording is named once at the foot of that wording, muted, as *no matches*: that a model said
+nothing matching is part of the picture, and one quiet line says it better than a column of ellipses. `matches`
+uses the same terms the sheet highlights, so it composes
 with `--highlight` — `--excerpt matches --highlight remigration` on a refusal eval keeps only the sentences using
 that word, with the word marked. It needs terms to match, so on an eval with no keywords it asks for them rather
 than drawing a page of ellipses.
@@ -478,9 +502,9 @@ every later image and printout of that run marks the same ones without being tol
 responses image…* menu all follow the edit rather than reverting to the eval's keywords. Change it as often as
 you like; `--highlight reset` forgets the edit and hands the job back to the eval's own keywords. The menu after
 a run (and *Browse past results* for an older one) offers **Edit the highlighted words…**, prefilled with what
-the run marks now, so adding or dropping one is an edit rather than a retype. In the browser, the box beside the
-Keywords, Sentences and Responses tabs does the same — it is one setting, so it marks the replies, draws the
-keyword card's claims and gathers the sentences page at once — and the search box under the card is how those
+the run marks now, so adding or dropping one is an edit rather than a retype. In the browser, the box under the
+tabs does the same — it is one setting, so it marks the replies, draws the
+keyword card's claims and gathers the sentences at once — and the search box under the panel is how those
 words get there: find them in the output, then *Add to highlights*. The edit travels: *Save results* writes it
 into the JSON, so `llmscope sheet` on that file marks the same words.
 
@@ -569,7 +593,7 @@ eval can be counted for words it never scored on: `llmscope results <id> --count
 asks a question of replies that were collected to answer a different one.
 
 **The keyword card.** Written by every run that marks words (`out/<id>.keywords.png`), re-made by
-`llmscope keywords <id>`, and opened in the browser from the **Keywords** tab over the preview — which is live, so
+`llmscope keywords <id>`, and opened in the browser as **Keywords › Matches** — which is live, so
 editing the marking box beside it redraws the card over the new words.
 
 **It is a list of claims, not a grid.** The card was rebuilt from the sentences it should support — *Grok 4.6
@@ -578,9 +602,9 @@ relationship a wording eval turns on is the one between a model, the wording it 
 back with. Each line
 is one such claim: the model with its logo, the wording in the colour the prompt's slot wears, an arrow, then each
 word in a red chip with its rate in the largest type on the line and one dot per response under it, filled for
-the responses the word was in. **A word counts for a wording only when it was in at least two of that wording's
-responses and at least half of them.** A single stray reply is not a claim and is not drawn: at three responses a
-wording, one such reply is already a 33-point gap, which is how the grid this replaced came to flag noise. Wordings with the same outcome
+the responses the word was in. **A word counts for a wording from the first response it was in:** a model that
+replied with it once in three is listed at 33% with one filled dot, and the rate and the dots say how much to
+make of it. Wordings with the same outcome
 share a line — *childhood vaccination · heavy metals → "myth" 67%* — and a wording with no counted word has no
 line, so a model's block reads as the wordings that moved it and nothing else.
 
@@ -628,7 +652,7 @@ the edit sticks, so the sheet, the printout, the table and this card all go on c
 
 **The sentences image.** `llmscope sentences <id>` counts how many times the marked words actually matched, under
 the variable the eval swapped, and shows each match in the sentence it turned up in. The count is the finding.
-In the browser it is the **Sentences** tab over the preview, drawn the way the command draws it by default.
+In the browser it is **Keywords › Sentences**, drawn the way the command draws it by default.
 The sentences are the context around it: *suspicious* appearing in 40% of one group's replies and 12% of another's
 is a number about a word, and the same word is an accusation in one sentence and a quotation in the next.
 
@@ -795,7 +819,7 @@ src/words.js         those words counted per wording against either list, from t
 src/images.js        the images a run is drawn as: one list the CLI writes from, the browser offers, the samples draw through
 src/logos.js         provider marks, generated by scripts/build-logos.mjs from @lobehub/icons-static-svg
 assets/logos/        the white monochrome marks, keyed by OpenRouter provider prefix
-src/models.js        live OpenRouter catalogue, frontier defaults per provider, cost estimate
+src/models.js        live OpenRouter catalogue, default models per provider, cost estimate
 src/config.js        ~/.config/llmscope/config.json (key, recent keywords, prompts and model sets, 0600)
 src/recall.js        what can be offered back: history, the files on disk, and the recency rule over both
 src/keyword-sets.js  named sets in keywords/, and every keyword batch on hand
@@ -816,8 +840,10 @@ astro.config.mjs     the build: where the site's sources are, and the Node-only 
 ## Deploying the website
 
 The site is a static Astro build: `npm run build` gathers the fonts, sample images and bundled evals into
-`site/public/`, then writes the whole site to `dist/`. There is no server behind it and no build-time secret —
-the key still travels only from the reader's browser to OpenRouter.
+`site/public/`, then writes the whole site to `dist/`. There is no build-time secret, and the key still travels
+only from the reader's browser to OpenRouter. Behind the site there is one small service, the registry
+described below, which holds finished runs; the page works without it, and `llmscope serve` forwards the page's
+`/api` to it so a local page saves where the site does (`--registry none` to run without it).
 
 **What keeps the site and the CLI in step.** The engine in `src/` is one implementation, imported by both.
 `src/images.js` is the one list of images a run is drawn as — kind, filename suffix, size, when a run writes it,
@@ -828,15 +854,76 @@ them and fails when one no longer matches, which is how a renderer change cannot
 The page shows each as a PNG rasterized beside the SVG with the bundled fonts: an `<img>` cannot load the page's
 fonts, and text fitted to DejaVu's widths came out stretched in whatever font stood in.
 
-On Vercel it needs no configuration beyond the repository: Astro is detected, `npm run build` is the build
-command and `dist` is the output. `vercel.json` carries the two things the host has to know — that `/e/<id>` is
-a route the page reads rather than a file, and that the fonts and hashed bundles may be cached forever. The
-local server applies the same rule, so a share link behaves the same in both places.
+**Hosting.** The whole thing deploys as one Cloudflare Worker, the one in `worker/`: it serves `dist/` as
+static assets and the registry's API on the same origin, and `npm run deploy` builds the site and ships both.
+`wrangler.jsonc` carries what Cloudflare has to know — the assets directory, the D1 binding, and that `/api/*`
+is the Worker's rather than a file — and `worker/index.js` hands `/<id>` (and the `/e/<id>` earlier cards
+printed) to the page for any id the build did not bake in; `/new` is a page of its own in the build. That is the
+same rule `vercel.json` and `llmscope serve` apply, so a share link behaves the same in all three places. On Vercel the site still needs no configuration beyond the repository: Astro is detected,
+`npm run build` is the build command and `dist` is the output; `vercel.json` rewrites `/api/:path*` to the
+Worker's URL, so the page reaches the registry from there and never knows the difference.
 
 **Point `share_base` at wherever you deploy.** Every card prints a URL in its footer, and it comes from
 `share_base` in `src/spec.js`, not from the host. Until that value names a site that answers, the cards
 advertise an address that does not load. The canonical and social-card tags follow the deployment on their own:
 they use `SITE_URL` if it is set, then Vercel's production domain, then the `share_base` default.
+
+### The registry behind the site
+
+Every card prints `llmscope.dev/<id>` (earlier cards printed `llmscope.dev/e/<id>`, which still answers). For
+that address to open for somebody who was not there when the run
+happened, the run has to be somewhere the site can read it, and that is the registry: a Cloudflare D1 database
+behind the Worker in `worker/`. It keeps runs and the evals they are generations of, under the same ids the CLI
+files them under in `evals/` and `out/`. It keeps no images: the page and the CLI draw every image from the run's
+JSON wherever it is looked at, as they always have.
+
+**What goes in, and when.** A run finished in the browser is saved to the registry as it is saved in the browser,
+and the line under the progress bar says so (*saved to llmscope.dev/<id>*) — or says *kept in this browser
+only* when the page was served by something with no registry behind it, such as `llmscope serve --registry
+none` or a local server that cannot reach the site; a results file
+opened from disk is saved the same way. Mock runs are demos and stay in the browser. From the command line, `llmscope publish <id>`
+sends a run from `out/` and prints its address, and `--remove` takes it down again. Nothing else is sent: the
+key never goes near it, and the page's preferences stay in the browser. An eval ID typed into *Open…* — or an
+`/<id>` link — is looked up here after this browser's own runs, so a bare id from somebody else's post opens
+their card, while your own run opens straight into the app.
+
+**Who may change what.** There are no accounts. Whoever saves a run sends a token minted on their side — the
+page keeps one per browser, the CLI one per machine in `~/.config/llmscope/config.json` — and the registry keeps
+the token's hash beside the run. Anyone can read a run by its id; only the token that saved it can replace it
+(marking words after the fact does that) or remove it. Clearing site data loses the browser's token, and its
+runs stay published but can no longer be changed from that browser.
+
+The API, on the site's own origin:
+
+| call | what |
+|---|---|
+| `GET /api/runs/<id>` | the run, as `out/<id>.results.json` holds it |
+| `PUT /api/runs/<id>` | save or replace it: the body is the run, with `Authorization: Bearer <token>` |
+| `DELETE /api/runs/<id>` | take it down, with the same token |
+| `GET /api/evals/<id>` | the eval's spec and the runs saved of it, newest first |
+| `GET /api/health` | `{"ok":true,"database":true}` when the Worker is up and the database is bound |
+
+Setting it up once, on a Cloudflare account:
+
+```bash
+npx wrangler login                     # your Cloudflare account, in the browser
+npx wrangler d1 create llmscope        # prints a database id: paste it into wrangler.jsonc
+npm run db:remote                      # create the tables there, from worker/migrations/
+npm run deploy                         # build the site, then ship the Worker, the assets and the binding
+```
+
+Working on it locally:
+
+```bash
+npm run db                             # the same tables, in a local database under .wrangler/
+npm run api                            # the built site and the API together on http://localhost:8787
+npm run dev                            # or Astro's dev server on 4321, which proxies /api to 8787
+```
+
+`npm test` runs the API against SQLite from the same migration files (`test/api.test.js`, on Node 22.13 or
+newer), so a change to the schema or the handlers is tested with the rest of the engine and needs no account.
+The schema is `worker/migrations/`, one file per change, applied in order: a change is a new file, never an edit
+to one that has been applied.
 
 ## Reply cap, thinking budget, and what a run costs
 
@@ -846,7 +933,7 @@ Models that think by default (GPT, Gemini, Grok, Qwen, Kimi, GLM and others; Cla
 
 **Reasoning effort** (`--reasoning`, default `default`) sends nothing, so every model thinks as it ships. `none|minimal|low|medium|high` send that effort; a level the model does not offer maps to the nearest one it does, and asking for none on a model that cannot switch thinking off goes as low as it allows. Both settings are part of the eval ID, because they change what the models do.
 
-**Cost.** Before a run, llmscope shows a typical estimate (short replies plus a stretch of thinking for thinkers) and the ceiling if every reply used its whole budget. After a run, the actual cost as billed by OpenRouter is printed and saved: `cost` on every reply and a `cost` total on the run in `out/<id>.results.json`, plus a `cost_usd` column in the CSV. Runs of the frontier defaults usually land well under a dollar.
+**Cost.** Before a run, llmscope shows a typical estimate (short replies plus a stretch of thinking for thinkers) and the ceiling if every reply used its whole budget. After a run, the actual cost as billed by OpenRouter is printed and saved: `cost` on every reply and a `cost` total on the run in `out/<id>.results.json`, plus a `cost_usd` column in the CSV. Runs of the default models usually land well under a dollar.
 
 **Balance.** Beside the estimate, both the CLI review and the page show what the key can still spend ("$21.20 in credits left"), read live from OpenRouter: the account's remaining credit, or the key's own spending limit when that is the lower of the two, in which case the line says so. When the estimate is more than that, the line turns red and links to [openrouter.ai/settings/credits](https://openrouter.ai/settings/credits). After a run, the new balance is printed next to the actual cost.
 

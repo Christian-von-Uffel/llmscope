@@ -8,11 +8,11 @@
 //
 // The model with its logo, the wording in the colour the prompt's slot wears, an arrow, then each word in a red
 // chip with its rate in the largest type on the line and one dot per run under it, filled for the runs the word
-// was in. A word counts for a wording only when it was in at least two of that wording's runs and at least half
-// of them: a single stray reply is not a claim, and it is not drawn. Wordings with the same outcome share a
-// line. Every model that ran is listed, ranked by its strongest claim, and one with no claim says “no matches”
-// beside its name, so the card says who is clean as well as who is not. Under the list a key shows the three
-// things a line is made of, drawn as they appear, each with what it means in the run's own numbers.
+// was in. A word counts for a wording from the first response it was in: the rate and the dots say how many,
+// and a reader who marked a word wants every model that replied with it, once included. Wordings with the same
+// outcome share a line. Every model that ran is listed, ranked by its strongest claim, and one with no claim
+// says “no matches” beside its name, so the card says who is clean as well as who is not. Under the list a key
+// shows the three things a line is made of, drawn as they appear, each with what it means in the run's own numbers.
 //
 // It replaced a grid of word × wording and word × family blocks. That grid could say which model used a word
 // at all, and which wording a word landed on across every model, but never which model used a word for one
@@ -27,10 +27,14 @@ import { pinTextWidths, SANS, MONO } from './text.js';
 
 const pct = (x) => `${Math.round(x * 100)}%`;
 
-/** A word counts for a wording when it was in at least this many of that wording's runs… */
-export const MIN_REPLIES = 2;
+/**
+ * A word counts for a wording when it was in at least this many of that wording's runs… One: the card stood at
+ * two-and-half-of-them for a while, and a model that replied with the word in one of three responses was then
+ * listed as "no matches", which read as a miss rather than a threshold. The rate and the dots carry the count.
+ */
+export const MIN_REPLIES = 1;
 /** …and in at least this share of them. */
-export const MIN_RATE = 0.5;
+export const MIN_RATE = 0;
 /** Past this many runs per wording, the dots under a rate give way to a count. */
 export const MAX_DOTS = 12;
 /** Whether a word's showing for one wording is a claim rather than a stray reply. */
@@ -113,7 +117,7 @@ export function claimSentence(m, l, { single = false } = {}) {
 /** The finding as a sentence: the strongest claim on the card, or the plain statement that there is none. */
 export function keywordFinding(claims) {
   const top = claims.withClaims[0];
-  if (!top) return { headline: `No model ${VERB} any of these words in ${MIN_REPLIES} or more of its responses` };
+  if (!top) return { headline: `No model ${VERB} any of these words${MIN_REPLIES > 1 ? ` in ${MIN_REPLIES} or more of its responses` : ''}` };
   return { headline: claimSentence(top, top.lines[0], { single: claims.single }) };
 }
 
@@ -378,7 +382,7 @@ export function renderKeywordCard(run, a, terms, { width = 1600, height = 1600, 
     ];
     if (listed.some((m) => !m.lines.length) || folded.length) {
       items.push({
-        label: `no word in ${need} or more of ${n} responses`,
+        label: need > 1 ? `no word in ${need} or more of ${n} responses` : `no marked word in any of its ${n} responses`,
         width: (ks) => textWidth('no matches', ks, false),
         draw: (x, mid, ks) => text(x, mid + ks * CAP_H / 2, 'no matches', { size: ks, fill: COLORS.muted }),
       });

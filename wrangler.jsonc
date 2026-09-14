@@ -1,0 +1,32 @@
+// The Cloudflare side of llmscope: one Worker that serves the built site from dist/ and the API from D1.
+//
+//   npx wrangler d1 create llmscope        once per account; the id it prints is database_id below (done 14 Sep 2026)
+//   npm run db                             apply worker/migrations/ to the local database (wrangler dev uses it)
+//   npm run db:remote                      the same, to the real one
+//   npm run api                            the site and the API together on http://localhost:8787
+//   npm run deploy                         build the site, then ship the Worker, the assets and the binding
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "llmscope",
+  "main": "worker/index.js",
+  "compatibility_date": "2026-09-11",
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "html_handling": "drop-trailing-slash",
+    "run_worker_first": [
+      "/api/*"
+    ]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "llmscope",
+      "database_id": "97b72c30-dc9f-4afc-8e0a-7c3bfa5a5f42",
+      "migrations_dir": "worker/migrations"
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}

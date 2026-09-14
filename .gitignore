@@ -11,3 +11,7 @@ site/public/*
 
 # Local Vercel state: the linked project and its pulled environment. Added by the Vercel CLI.
 .vercel
+
+# Wrangler's local state: the local D1 database `npm run api` reads, and any local secrets.
+.wrangler/
+.dev.vars

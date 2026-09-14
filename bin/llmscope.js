@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import http from 'node:http';
 import { spawn, execFileSync } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { planRun, runEval, rescoreRun } from '../src/engine.js';
 import { analyze, totalTokens, defaultThreshold, outcomeOf, replyBody } from '../src/analyze.js';
@@ -541,6 +542,7 @@ async function writeOutputs(run, { outDir = 'out', out, svg, png, url, title, hi
     svg: svg || path.join(outDir, `${run.id}${imageSuffix('card')}.svg`),
     png: png === false ? null : png || path.join(outDir, `${run.id}${imageSuffix('card')}.png`),
     mode,
+    refusals: null,
     wordcloud: null,
     keywords: null,
   };
@@ -557,10 +559,20 @@ async function writeOutputs(run, { outDir = 'out', out, svg, png, url, title, hi
   const opts = { a, png: png !== false, url, excerpt, sort, title: mode, lexicon };
   for (const image of imagesFor(run)) {
     const writer = WRITERS[image.kind] || ((r, p, o) => writeImage(r, p.json, image.kind, o));
-    written[image.kind] = await writer(run, paths, opts);
+    // An image with nothing on it — the refusals page of a run nobody refused — is not written, and says why.
+    try { written[image.kind] = await writer(run, paths, opts); } catch (err) {
+      if (!err.empty) throw err;
+      written[image.kind] = null;
+      paths.skipped = { ...(paths.skipped || {}), [image.kind]: err.message };
+    }
   }
+  paths.refusals = written.refusals?.path || null;
   return { analysis: a, paths, sheet: written.responses, keywords: written.keywords || null };
 }
+
+/** The refusals page in a summary: its path, or why there is none — a run nobody refused has no page to show. */
+const refusalsLine = (paths, note = 'every refused reply, cut to the sentence it declined in, the refusing phrase marked') =>
+  `refusals:  ${paths.refusals ? `${paths.refusals}   ${dim(note)}` : dim(`not written · ${paths.skipped?.refusals || 'nothing in this run was refused'}`)}`;
 
 /**
  * How each image in the catalogue is written beside a run's results. The card, the sheets and the keyword card
@@ -608,7 +620,7 @@ const WRITERS = {
 /** Any image in the catalogue, drawn at its defaults and written beside the run's results: what a kind gets until it has a writer of its own. */
 async function writeImage(run, file, kind, { a = null, url = null, png = true, title = 'prompt', highlight, lexicon = null } = {}) {
   const drawn = drawImage(kind, run, { a, url: url || null, names: namesMap(), date: run.finished_at, title, highlight: markedTerms(run, highlight), lexicon });
-  if (!drawn.svg) throw new Error(drawn.empty);
+  if (!drawn.svg) throw Object.assign(new Error(drawn.empty), { empty: true });
   const base = file.replace(/\.results\.json$/, '');
   const svgPath = `${base}${imageSuffix(kind)}.svg`;
   await fs.writeFile(svgPath, drawn.svg);
@@ -628,7 +640,7 @@ function chooseModels(spec, args, list, { quiet = false } = {}) {
   if (args['add-models']) picked = [...picked, ...splitList(args['add-models'])];
   if (!picked.length) {
     picked = pickFrontier(list);
-    say(dim(`no models given; using frontier defaults: ${picked.map(shortModel).join(', ')}`));
+    say(dim(`no models given; using the default models: ${picked.map(shortModel).join(', ')}`));
   }
   const { ids, expansions, unmatched } = resolveModels(picked, list);
   for (const e of expansions) {
@@ -744,7 +756,7 @@ async function execute(inputSpec, args = {}) {
   }
   void keywords;
   console.log(`\nshare: ${bold(plan.spec.share_base + run.id)}   rerun: llmscope run ${target.file}`);
-  console.log(`results:   ${paths.json}   ${dim(`browse: llmscope results ${run.id}`)}\ncard:      ${paths.png || paths.svg}   ${dim(`title: ${paths.mode} · post this one`)}\nwordcloud: ${paths.wordcloud}   ${dim('one cloud per wording: the words replies were scored on, sized by how many used them')}\nresponses: ${paths.sheet}   ${dim(`${sheet.replies} replies · ${sheet.note}${sheet.highlight.length ? ` · highlighting ${sheet.highlight.join(', ')}` : ''} · ${SHEET_LINKS}`)}\nends:      ${paths.ends}   ${dim('the first and last sentence of every reply · how each model opens and where it lands')}${paths.keywords ? `\nkeywords:  ${paths.keywords}   ${dim(`${keywordSummary(analysis, run)} · post this beside the card`)}` : ''}\nalt text:  ${paths.share}   ${dim('alt text and caption to paste with the card')}`);
+  console.log(`results:   ${paths.json}   ${dim(`browse: llmscope results ${run.id}`)}\ncard:      ${paths.png || paths.svg}   ${dim(`title: ${paths.mode} · post this one`)}\n${refusalsLine(paths)}\nwordcloud: ${paths.wordcloud}   ${dim('one cloud per wording: the words replies were scored on, sized by how many used them')}\nresponses: ${paths.sheet}   ${dim(`${sheet.replies} replies · ${sheet.note}${sheet.highlight.length ? ` · highlighting ${sheet.highlight.join(', ')}` : ''} · ${SHEET_LINKS}`)}\nends:      ${paths.ends}   ${dim('the first and last sentence of every reply · how each model opens and where it lands')}${paths.keywords ? `\nkeywords:  ${paths.keywords}   ${dim(`${keywordSummary(analysis, run)} · post this beside the card`)}` : ''}\nalt text:  ${paths.share}   ${dim('alt text and caption to paste with the card')}`);
   // Printed, not just written: the alt field is filled in at the moment of posting, and that is the terminal.
   console.log(`\n${bold('alt text')} ${dim('(paste into the image description field)')}\n${altText(analysis, { names: namesMap() })}`);
   if (TTY && !args.yes) await afterRun(run, paths, { outDir: args['out-dir'] || 'out', specSaved: saved, analysis, args });
@@ -1110,7 +1122,7 @@ async function askPrompt({ message, current = '', outDir = 'out' } = {}) {
 
 // ---------- model-set recall ----------
 /**
- * The same recall over model sets. A new eval starts from the last set you picked, or the frontier defaults
+ * The same recall over model sets. A new eval starts from the last set you picked, or the default models
  * if you have not picked one yet; up-arrow walks every set this project has used, and ctrl-r opens the
  * catalogue list so a set can still be ticked rather than retyped.
  */
@@ -1992,7 +2004,7 @@ async function cmdKey(args) {
 
 async function cmdModels(args) {
   const list = await models();
-  if (!list.length) { console.log('Built-in frontier defaults:\n  ' + FRONTIER_DEFAULTS.join('\n  ')); return; }
+  if (!list.length) { console.log('Built-in default models:\n  ' + FRONTIER_DEFAULTS.join('\n  ')); return; }
   const frontier = new Set(pickFrontier(list));
   const byId = new Map(list.map((m) => [m.id, m]));
   const line = (id) => {
@@ -2010,7 +2022,7 @@ async function cmdModels(args) {
     const kind = expansions[0]?.kind || 'id';
     console.log(`\n${bold(`${ids.length} model${ids.length === 1 ? '' : 's'}`)} ${dim(`· ${kind} “${selector}”`)}`);
     for (const id of ids) console.log(line(id));
-    console.log(dim(`\n★ = frontier default. Run an eval on all of them: llmscope run <eval.json> --models ${selector}`));
+    console.log(dim(`\n★ = default model. Run an eval on all of them: llmscope run <eval.json> --models ${selector}`));
     return;
   }
   const providers = typeof args.provider === 'string' ? [args.provider] : MAIN_PROVIDERS.map((p) => p.prefix);
@@ -2018,7 +2030,7 @@ async function cmdModels(args) {
     console.log(`\n${bold(group.name)}`);
     for (const m of group.models) console.log(line(m.id));
   }
-  console.log(dim('\n★ = frontier default. This lists the flagship tier only; llmscope models <family|provider> lists every tier of one'));
+  console.log(dim('\n★ = default model. This lists the flagship tier only; llmscope models <family|provider> lists every tier of one'));
   console.log(dim('  (llmscope models gemini). Any of those works with --models, --add-models and --drop-models, or in a spec file.'));
 }
 
@@ -2348,7 +2360,7 @@ async function cmdRender(args) {
   await models({ quiet: true }); // display names for the share card; fine without network
   const { analysis, paths } = await writeOutputs(run, { outDir: path.dirname(file), out: args.out || file, svg: args.svg, png: args.png === 'none' ? false : args.png, url: args.url, title: args.title, highlight: highlightTerms(args), excerpt: excerptMode(args), sort: sortMode(args), lexicon: lexiconMode(args) });
   printSummary(analysis);
-  console.log(`card:      ${paths.png || paths.svg}   ${dim(`title: ${paths.mode} · post this one`)}\nwordcloud: ${paths.wordcloud}   ${dim('one cloud per wording: the words replies were scored on, sized by how many used them')}\nresponses: ${paths.sheet}   ${dim(SHEET_LINKS)}\nends:      ${paths.ends}   ${dim('the first and last sentence of every reply')}\nalt text:  ${paths.share}`);
+  console.log(`card:      ${paths.png || paths.svg}   ${dim(`title: ${paths.mode} · post this one`)}\n${refusalsLine(paths)}\nwordcloud: ${paths.wordcloud}   ${dim('one cloud per wording: the words replies were scored on, sized by how many used them')}\nresponses: ${paths.sheet}   ${dim(SHEET_LINKS)}\nends:      ${paths.ends}   ${dim('the first and last sentence of every reply')}\nalt text:  ${paths.share}`);
 }
 
 async function cmdId(args) {
@@ -2377,8 +2389,40 @@ const SITE = path.join(ROOT, 'dist');
  * bundle — so what runs here is what runs there, and the key still goes straight from the page to OpenRouter
  * without passing through this process.
  */
+/** The site: where `publish` sends a run, and where `serve` forwards the page's /api unless told otherwise. */
+const SITE_DEFAULT = 'https://www.llmscope.dev';
+const siteFrom = (value) => String((typeof value === 'string' && value) || process.env.LLMSCOPE_SITE || SITE_DEFAULT).replace(/\/+$/, '');
+
+/**
+ * The page's one call home, forwarded. The page only ever talks to its own origin, so a local server stands in
+ * for the registry by passing /api/* through to the site: a run finished on a local page is then saved where
+ * its card says it is, with nothing to click, exactly as on the site. Only the method, the JSON body and the
+ * owner token travel; the key never goes near /api. A registry that cannot be reached answers as a static host
+ * would — not JSON — and the page then keeps the run to itself and says so.
+ */
+async function forwardApi(req, res, registry, urlPath) {
+  const chunks = [];
+  for await (const chunk of req) chunks.push(chunk);
+  const headers = {};
+  for (const name of ['content-type', 'authorization', 'accept']) if (req.headers[name]) headers[name] = req.headers[name];
+  let upstream;
+  try {
+    upstream = await fetch(`${registry}${urlPath}${new URL(req.url, 'http://x').search}`, {
+      method: req.method, headers, body: ['GET', 'HEAD'].includes(req.method) ? undefined : Buffer.concat(chunks), redirect: 'follow',
+    });
+  } catch (err) {
+    res.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+    return res.end(`could not reach ${registry}: ${err.cause?.message || err.message}`);
+  }
+  const body = Buffer.from(await upstream.arrayBuffer());
+  res.writeHead(upstream.status, { 'Content-Type': upstream.headers.get('content-type') || 'application/octet-stream', 'Cache-Control': 'no-store' });
+  res.end(body);
+}
+
 async function cmdServe(args) {
   const port = Number(args.port) || Number(process.env.PORT) || 5173;
+  // --registry none keeps every run in the browser; anything else is the site whose registry the page saves to.
+  const registry = args.registry === 'none' || args.registry === false ? null : siteFrom(args.registry);
   if (!(await fs.stat(path.join(SITE, 'index.html')).catch(() => null))) {
     console.error(`No site to serve: ${path.relative(process.cwd(), SITE) || SITE} has not been built.`);
     console.error('Build it with `npm run build` from a clone. A published install builds it on npm install.');
@@ -2388,6 +2432,13 @@ async function cmdServe(args) {
   const server = http.createServer(async (req, res) => {
     let urlPath = '/';
     try { urlPath = decodeURIComponent(new URL(req.url, 'http://x').pathname); } catch { /* keep the root */ }
+    if (urlPath === '/api' || urlPath.startsWith('/api/')) {
+      if (registry) return forwardApi(req, res, registry, urlPath);
+      // No registry asked for. The page reads this answer and keeps its runs to itself; `llmscope publish`
+      // can still send one to the site later.
+      res.writeHead(404, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+      return res.end(JSON.stringify({ error: 'this local server has no API; runs stay in the browser' }));
+    }
     const send = async (file, code = 200) => {
       const data = await fs.readFile(file);
       res.writeHead(code, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-store' });
@@ -2399,9 +2450,10 @@ async function cmdServe(args) {
       return await send(file);
     } catch { /* not a file; it may still be a directory page or a route */ }
     if (!path.extname(urlPath)) {
-      // The build writes a page per directory, so /e/<id> is /e/<id>/index.html. Where no such page exists the
-      // root one answers instead: /e/<id> for an eval nobody has published is still an address the page can
-      // read an id out of. The host is configured to resolve those two the same way, in the same order.
+      // The build writes a page per directory, so /new is /new/index.html and /<id> is /<id>/index.html for a
+      // bundled eval. Where no such page exists the root one answers instead: /<id> (or the older /e/<id>) for an
+      // eval nobody has published is still an address the page can read an id out of. The host is configured to
+      // resolve those the same way, in the same order.
       for (const fallback of [path.join(file, 'index.html'), path.join(SITE, 'index.html')]) {
         try { return await send(fallback); } catch { /* try the next */ }
       }
@@ -2409,7 +2461,42 @@ async function cmdServe(args) {
     res.writeHead(404);
     res.end('not found');
   });
-  server.listen(port, () => console.log(`llmscope UI: http://localhost:${port}`));
+  server.listen(port, () => {
+    console.log(`llmscope UI: http://localhost:${port}`);
+    console.log(dim(registry
+      ? `registry: ${registry} · runs you finish are saved there, as on the site · --registry none keeps them in this browser`
+      : 'registry: none · runs stay in this browser'));
+  });
+}
+
+/**
+ * Send a run to the site, so the address its card prints answers for anyone. The site keeps it under the run's
+ * own id with a token this machine mints once and keeps beside the key in the config file, so only this machine
+ * can replace or take it down. Mock runs stay home: they are demos, and the site refuses them too.
+ */
+async function cmdPublish(args) {
+  const ref = args._[1];
+  if (!ref) throw new Error('usage: llmscope publish <run id | results.json> [--remove] [--site https://www.llmscope.dev]');
+  const site = siteFrom(args.site);
+  const shown = site.replace(/^https?:\/\//, '');
+  const run = await loadRun(await findResults(ref, args['out-dir'] || 'out'), { quiet: true });
+  if (run.provider === 'mock' && !args.remove) throw new Error(`${run.id} is a mock run, a demo; the site publishes only real ones`);
+  let { publish_token: token } = await loadConfig();
+  if (!token) { token = randomBytes(24).toString('hex'); await updateConfig({ publish_token: token }); }
+  const init = args.remove
+    ? { method: 'DELETE', headers: { authorization: `Bearer ${token}` } }
+    : { method: 'PUT', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify(run) };
+  let res;
+  try { res = await fetch(`${site}/api/runs/${run.id}`, init); } catch (err) { throw new Error(`could not reach ${site}: ${err.cause?.message || err.message}`); }
+  const isJson = /\bapplication\/json\b/.test(res.headers.get('content-type') || '');
+  if (args.remove) {
+    if (res.status === 204) return console.log(`removed ${run.id} from ${shown}`);
+    if (res.status === 404 && isJson) return console.log(`${shown} has no run ${run.id}`);
+  } else if (res.ok && isJson) {
+    return console.log(`${res.status === 201 ? 'published' : 'updated'} ${bold(`${shown}/${run.id}`)}`);
+  }
+  const why = isJson ? await res.json().then((b) => b.error).catch(() => null) : 'no API answers there';
+  throw new Error(`${shown} answered ${res.status}${why ? `: ${why}` : ''}`);
 }
 
 async function cmdMenu(args) {
@@ -2587,7 +2674,7 @@ const HELP = `llmscope — deterministic LLM bias evals (bring your own OpenRout
                                 words of your own. A name that matches nothing stops the run rather than
                                 becoming a keyword nothing will ever match.
   llmscope key [--show|--clear]  store your OpenRouter key (0600 file) — or set OPENROUTER_API_KEY
-  llmscope models [--all]       newest flagship models per provider with prices; ★ = frontier default
+  llmscope models [--all]       newest flagship models per provider with prices; ★ = default model
   llmscope models <selector>    every tier of one family or provider (llmscope models gemini)
   llmscope examples             list bundled example evals with the slot values they compare
   llmscope expand <spec.json>   print every request in shuffled order (no API calls); takes the same
@@ -2604,7 +2691,12 @@ const HELP = `llmscope — deterministic LLM bias evals (bring your own OpenRout
                                 renderer; --all re-renders all of them, --find X narrows either to the
                                 runs that mention X. No API calls: the replies are already on disk
   llmscope id <spec.json>       print the 6-char content ID
-  llmscope serve [--port 5173]  browser UI (same engine, key stays in the browser)
+  llmscope serve [--port 5173] [--registry <site>|none]
+                                browser UI (same engine, key stays in the browser); runs you finish are
+                                saved to the site's registry as on the site, or kept local with --registry none
+  llmscope publish <id> [--remove]   save a run to the site, so the address on its card opens for anyone;
+                                --remove takes it down again. --site https://… (or LLMSCOPE_SITE) for a site
+                                of your own; the token that owns the run is kept in the config file
 
 Reusing a batch of keywords: every prompt that asks for words — the guided eval, the highlight editor, the
 counts table, "sentences that matched" — recalls earlier batches with the up-arrow, and opens a picker over the
@@ -2620,7 +2712,7 @@ phrasing" walk every prompt this project has asked — typed lately, in the eval
 most recently asked first, with ctrl-r for the picker. Press up, move two words, run it: that is the loop for
 testing a subtle change in wording.
 
-Models recall the same way: a new eval starts from the last set you picked (or the frontier defaults), the
+Models recall the same way: a new eval starts from the last set you picked (or the default models), the
 up-arrow walks earlier sets, and ctrl-r opens the catalogue list so you can still tick models rather than
 retype them. A family, provider, glob or ID types into the same box. Sets accepted there are remembered for
 the next eval.
@@ -2662,7 +2754,7 @@ process.stdout.on('error', (err) => { if (err.code === 'EPIPE') process.exit(0);
 
 const args = parseArgs(process.argv.slice(2));
 const cmd = args._[0];
-const commands = { run: cmdRun, new: cmdNew, results: cmdResults, sheet: cmdSheet, keywords: cmdKeywords, sentences: cmdSentences, sets: cmdSets, key: cmdKey, models: cmdModels, examples: cmdExamples, render: cmdRender, id: cmdId, expand: cmdExpand, serve: cmdServe, help: async () => console.log(HELP), menu: cmdMenu };
+const commands = { run: cmdRun, new: cmdNew, results: cmdResults, sheet: cmdSheet, keywords: cmdKeywords, sentences: cmdSentences, sets: cmdSets, key: cmdKey, models: cmdModels, examples: cmdExamples, render: cmdRender, id: cmdId, expand: cmdExpand, serve: cmdServe, publish: cmdPublish, help: async () => console.log(HELP), menu: cmdMenu };
 (async () => {
   try {
     if (args.help || cmd === '--help') return console.log(HELP);

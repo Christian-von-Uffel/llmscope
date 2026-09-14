@@ -325,11 +325,18 @@ input[type=checkbox], input[type=radio] { width: auto; display: inline-block; ma
 .viewbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
 .viewbar .spacer { flex: 1; }
 .viewbar select { flex: 0 1 190px; margin-top: 0; }
+/* The second row is about the tab above it: what to show of it, and how the image is headed. */
+.viewbar.views { margin-top: -4px; }
+.viewbar.views:empty, .viewbar.views:not(:has(:not([hidden]))) { display: none; }
+#view-note { flex: 1 1 200px; }
 .seg { display: inline-flex; border: 1px solid var(--line-strong); border-radius: 8px; overflow: hidden; }
 .seg button { border: 0; border-radius: 0; background: transparent; padding: 7px 13px; font-size: 13px; color: var(--muted); }
 .seg button + button { border-left: 1px solid var(--line-strong); }
 .seg button.on { background: var(--dark); color: #fff; }
 .seg button:disabled { opacity: .4; }
+/* The tabs are the panel's first row and read a size up from the views under them. */
+#tabs button { font-weight: 600; color: var(--text); }
+#tabs button.on { color: #fff; }
 
 .markbar { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; padding: 12px 14px; margin-bottom: 12px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; }
 .markbar .field { flex: 1 1 260px; min-width: 0; }
@@ -369,6 +376,8 @@ td.resp:not(.clip) .resp-preview { display: none; }
 /* A hit is marked the way the responses image marks it: dark text on the same amber block. The cue is
    luminance, not hue, so it survives every kind of colour vision and a grayscale screenshot alike. */
 td.resp mark { background: var(--mark); color: #15171c; border-radius: 3px; padding: 0 2px; }
+/* Under "only matching sentences", a reply with none says so quietly instead of standing as a bare ellipsis. */
+td.resp .nomatch { color: var(--muted); font-style: italic; }
 
 /* Whose reply it is: the provider's mark beside the model id, in the monospace an id is written in everywhere
    else. No per-model colour — the responses image needs it because it cannot repeat the name on every line,

@@ -23,7 +23,7 @@ const DEFAULTS = Object.freeze({
   // analysis / presentation only (not part of the ID). Card wording is fixed on purpose so images are comparable.
   sentiment_analyzer: 'afinn', // afinn | builtin | http(s)://url | ./module.js — see checks/sentiment.js
   card_title: null, // null: whatever the default heading is (see defaultCardTitle) · finding: the sentence · prompt: the prompts
-  share_base: 'llmscope.dev/e/',
+  share_base: 'llmscope.dev/', // the address a card prints before the run's id; /e/<id> still answers for cards that printed it
 });
 
 // Fields that change what the eval actually does. Everything else is presentation.

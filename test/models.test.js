@@ -22,9 +22,10 @@ test('isChatModel keeps flagships and drops variants, guards, lite/mini, image o
   assert.ok(!ids.includes('acme/frontier-1:free'));
 });
 
-test('pickFrontier prefers curated IDs when listed, else the newest chat model of that provider', () => {
+test('pickFrontier prefers curated IDs when listed, else the newest chat model of that provider under the price cap', () => {
   const picked = pickFrontier(catalogue, ['openai', 'google', 'meta-llama', 'acme']);
-  assert.deepEqual(picked, ['openai/gpt-6-astra', 'google/gemini-3.8-flash', 'meta-llama/llama-4-maverick', 'acme/frontier-1']);
+  // openai/gpt-5.6-sol is not in this catalogue; gpt-6-astra is newest but at $50 per million output, so the fallback skips it
+  assert.deepEqual(picked, ['openai/gpt-6-astra-pro', 'google/gemini-3.8-flash', 'meta-llama/llama-4-maverick', 'acme/frontier-1']);
   assert.deepEqual(pickFrontier([]), FRONTIER_DEFAULTS);
   assert.equal(newestPerProvider(catalogue, ['openai'], 1)[0].models[0].id, 'openai/gpt-6-astra', 'tie broken by shorter id');
 });

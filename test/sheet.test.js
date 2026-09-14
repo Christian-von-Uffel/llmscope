@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { runEval, rescoreRun } from '../src/engine.js';
 import { analyze } from '../src/analyze.js';
-import { renderResponseSheet, renderResponseSheets, selectResponses, linkUrl, columnGap, estimateCapacity, collapseEmoji, columnsFor, columnsForFont, maxFontFor, WORDS_PER_COLUMN, sheetNote, sheetNoteParts, quarterWidth, iconSide, iconAdvance, MARK_TEXT, MARK_WORD, BADGES, sentences, excerpt, EXCERPTS, SELECTIONS, sheetPresets } from '../src/sheet.js';
+import { NO_MATCHES, renderResponseSheet, renderResponseSheets, selectResponses, linkUrl, columnGap, estimateCapacity, collapseEmoji, columnsFor, columnsForFont, maxFontFor, WORDS_PER_COLUMN, sheetNote, sheetNoteParts, quarterWidth, iconSide, iconAdvance, MARK_TEXT, MARK_WORD, BADGES, sentences, excerpt, EXCERPTS, SELECTIONS, sheetPresets } from '../src/sheet.js';
 import { createMockProvider } from '../src/providers/mock.js';
 import { modelPalette, modelColors, contrast, spreadIndex } from '../src/palette.js';
 import { ensureText, measureWidth, font, FONT_METRICS } from '../src/text.js';
@@ -363,10 +363,32 @@ test('the note keeps what a reader cannot deduce and drops what the legend alrea
   assert.ok(!sheetNote().includes('group names'), 'and the group names are amber on the page itself');
   assert.deepEqual(sheetNoteParts(['propaganda'], 'matches'), [
     'highlighted = “propaganda”',
-    'showing only the sentences that contain a match · … = the rest',
+    'showing only the sentences that contain a match · … = the rest · no matches = a model none of whose replies matched',
   ]);
   // The last part is the one a reader cannot get from the image, so it is the one that survives.
   assert.equal(sheetNoteParts([], 'ends').length, 1);
+});
+
+test('under "only matching sentences" the sheet lists the replies that matched, and names each model with none once, muted', async () => {
+  await ensureText();
+  const spec = { prompts: ['A {race} man is walking down the street. How does the woman feel?'], variables: { race: ['black', 'white'] }, models: ['openai/gpt-6-astra', 'anthropic/claude-fable-5.1'], runs: 3 };
+  const run = await runEval(spec, { provider: createMockProvider({ refusalBias: { street: -1 } }) });
+  // A word one reply of one model used under one wording, and nothing else.
+  const first = run.results.find((r) => r.variantLabel === 'black' && r.model === 'openai/gpt-6-astra');
+  first.text = `${first.text} The quokka watched.`;
+  const textOf = (svg) => [...svg.matchAll(/<text[^>]*>([^<]*)<\/text>/g)].map((m) => m[1]).join(' ');
+  const sheet = renderResponseSheet(run, { size: 2048, excerpt: 'matches', highlight: ['quokka'] });
+  const said = textOf(sheet.svg);
+  assert.ok(said.includes('quokka'), 'the sentence that matched is on the page');
+  const quiet = (sheet.svg.match(new RegExp(`>${NO_MATCHES}<`, 'g')) || []).length;
+  // Under "black": one model matched, one did not. Under "white": neither did. Three muted rows, no ellipses standing in for whole replies.
+  assert.equal(quiet, 3, `one "${NO_MATCHES}" row per model with no match in a wording: ${quiet}`);
+  const full = renderResponseSheet(run, { size: 2048, excerpt: 'full', highlight: ['quokka'] });
+  assert.ok(!full.svg.includes(`>${NO_MATCHES}<`), 'the whole-reply sheet lists every reply as it always did');
+  assert.ok(textOf(full.svg).length > said.length, 'and is longer for it');
+  // Batched by model, a model with no match anywhere says so on one line under its name.
+  const byModel = renderResponseSheet(run, { size: 2048, excerpt: 'matches', highlight: ['quokka'], sort: 'model' });
+  assert.equal((byModel.svg.match(new RegExp(`>${NO_MATCHES}<`, 'g')) || []).length, 1);
 });
 
 test('the sheet is navigable: a model name jumps to its own replies, the background jumps back out', () => {
@@ -404,13 +426,14 @@ test('a model the selection left off the page is named but not linked', () => {
 });
 
 test('the URL is a link when it is an address, and plain text when it is only an id', () => {
-  assert.equal(linkUrl('llmscope.dev/e/abc'), 'https://llmscope.dev/e/abc', 'the default share base has no scheme');
+  assert.equal(linkUrl('llmscope.dev/abc'), 'https://llmscope.dev/abc', 'the default share base has no scheme');
+  assert.equal(linkUrl('llmscope.dev/e/abc'), 'https://llmscope.dev/e/abc', 'and the one earlier cards printed still links');
   assert.equal(linkUrl('https://x.test/e/abc'), 'https://x.test/e/abc');
   assert.equal(linkUrl('http://localhost:5173/e/abc'), 'http://localhost:5173/e/abc');
   assert.equal(linkUrl('abc123'), null, 'a bare id is not an address');
   assert.equal(linkUrl(''), null);
   const linked = renderResponseSheet(run, { size: 1600 });
-  assert.ok(linked.svg.includes(`<a href="https://llmscope.dev/e/${run.id}" xlink:href="https://llmscope.dev/e/${run.id}" target="_blank" rel="noopener"><title>open this eval</title>`));
+  assert.ok(linked.svg.includes(`<a href="https://llmscope.dev/${run.id}" xlink:href="https://llmscope.dev/${run.id}" target="_blank" rel="noopener"><title>open this eval</title>`));
   const bare = renderResponseSheet({ ...run, spec: { ...run.spec, share_base: '' } }, { size: 1600 });
   assert.ok(!bare.svg.includes('<a href="http'), 'nothing to open, nothing to click');
   assert.ok(bare.svg.includes(`>${run.id}</text>`), 'the id is still printed');

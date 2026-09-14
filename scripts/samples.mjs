@@ -31,6 +31,8 @@ export const pngName = (file) => file.replace(/\.svg$/, '.png');
 export const SAMPLES = [
   // No title given, so the sample is the card a run draws by default: the prompt at the head, no finding stated.
   { file: 'card.svg', run: 'D5a3G9', kind: 'card', opts: {} },
+  // The refusals behind that card: which wordings drew a decline, from whom, and in what words.
+  { file: 'refusals.svg', run: 'D5a3G9', kind: 'refusals', opts: { size: 1400 } },
   // The word cloud of the same run, so the page shows the two images one run leaves side by side. That run was
   // scored with the built-in list before AFINN-165 became the default, so the sample names the default list
   // rather than following the run, as `llmscope render D5a3G9 --lexicon afinn` would.

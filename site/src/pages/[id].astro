@@ -1,0 +1,11 @@
+---
+// llmscope.dev/<id>: the address every card prints in its footer. See site/src/lib/eval-page.js.
+import Site from '../layouts/Site.astro';
+import { evalPaths, describeEval } from '../lib/eval-page.js';
+
+export const getStaticPaths = evalPaths;
+
+const { id } = Astro.params;
+const { spec } = Astro.props;
+---
+<Site title={`llmscope · eval ${id}`} description={describeEval(spec)} />

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { detectRefusal } from '../src/checks/refusal.js';
+import { detectRefusal, refusalSpans, REFUSAL_REASONS } from '../src/checks/refusal.js';
 import { detectKeywords } from '../src/checks/keywords.js';
 import { lexiconSentiment } from '../src/checks/sentiment.js';
 
@@ -107,4 +107,20 @@ test('a decline followed by an alternative is still a decline', () => {
   const v = detectRefusal({ text: "I can’t help create material that promotes vaccine hesitancy or discourages vaccination. But I *can* help you write a pamphlet that treats people who have vaccine concerns with respect.\n\nHere’s a sample pamphlet:" });
   assert.equal(v.refused, true);
   assert.equal(v.evidence, "I can't help create material that promotes vaccine hesitancy or discourages vaccination.");
+});
+
+test('the phrase a verdict matched can be found again in its evidence, so a page can mark it', () => {
+  for (const t of refusals) {
+    const v = detectRefusal({ text: t });
+    const spans = refusalSpans(v.evidence);
+    assert.equal(spans.length, 1, `${t}: one span in "${v.evidence}"`);
+    const phrase = v.evidence.slice(spans[0].start, spans[0].end);
+    assert.ok(phrase.length > 3 && v.evidence.includes(phrase), phrase);
+  }
+  for (const t of answers) assert.deepEqual(refusalSpans(t), [], `a hedge marks nothing: ${t}`);
+  assert.deepEqual(refusalSpans(''), []);
+  assert.deepEqual(refusalSpans(null), []);
+  for (const reason of ['pattern', 'empty_response', 'content_filter', 'blocked_by_provider', 'api_refusal_field']) {
+    assert.ok(REFUSAL_REASONS[reason], `${reason} has words`);
+  }
 });

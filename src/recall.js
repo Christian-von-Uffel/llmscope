@@ -160,7 +160,7 @@ export async function rememberModels(ids, { at } = {}) {
 
 /**
  * Every model set this project has used, most recently first: what was picked lately, then whatever the evals
- * and the finished runs hold, then the live frontier defaults (untimed, so they sit last unless they were
+ * and the finished runs hold, then the live default models (untimed, so they sit last unless they were
  * also used). A set that appears in several places takes the position of its most recent use and shows up once.
  */
 export async function modelBank({ history = [], evalDirs = [], runDirs = [], frontier = [] } = {}) {
@@ -186,6 +186,6 @@ export async function modelBank({ history = [], evalDirs = [], runDirs = [], fro
       } catch {}
     }
   }
-  if (frontier.length) add(frontier, { source: 'frontier', origin: 'frontier defaults', when: '' });
+  if (frontier.length) add(frontier, { source: 'frontier', origin: 'default models', when: '' });
   return byRecency(found);
 }

@@ -16,11 +16,17 @@ export const MAIN_PROVIDERS = [
   { prefix: 'z-ai', name: 'Z.ai' },
 ];
 
-// Curated flagship per provider. Verified against the live list on 2026-09-06; pickFrontier() re-validates at
-// runtime and falls back to the newest chat model of that provider when an ID disappears.
+// What a default eval costs at most, per output token: $10 per million. The curated defaults stay under it, and so
+// does the fallback when one of them disappears. The frontier flagships (gpt-6-astra, claude-fable-5.1) sit at
+// $50 per million and would multiply the cost of a default run several times over; they stay a tick away.
+export const MAX_DEFAULT_OUTPUT_PRICE = 10 / 1e6;
+
+// Curated default per provider: the strongest model at or under MAX_DEFAULT_OUTPUT_PRICE. Verified against the
+// live list on 2026-09-13; pickFrontier() re-validates at runtime and falls back to the newest chat model of that
+// provider under the cap when an ID disappears.
 export const FRONTIER_DEFAULTS = [
-  'openai/gpt-6-astra',
-  'anthropic/claude-fable-5.1',
+  'openai/gpt-5.6-sol',
+  'anthropic/claude-sonnet-5',
   'google/gemini-3.8-flash',
   'x-ai/grok-4.6',
   'meta-llama/llama-4-maverick',
@@ -203,7 +209,7 @@ export function newestPerProvider(models, providers = MAIN_PROVIDERS.map((p) => 
   }));
 }
 
-/** Frontier default IDs: curated where still listed, otherwise the newest chat model of that provider. */
+/** Default model IDs: curated where still listed, otherwise the newest chat model of that provider at or under MAX_DEFAULT_OUTPUT_PRICE. */
 export function pickFrontier(models, providers = MAIN_PROVIDERS.slice(0, 8).map((p) => p.prefix)) {
   if (!models?.length) return FRONTIER_DEFAULTS.filter((id) => providers.some((p) => id.startsWith(p + '/')));
   const ids = new Set(models.map((m) => m.id));
@@ -211,7 +217,8 @@ export function pickFrontier(models, providers = MAIN_PROVIDERS.slice(0, 8).map(
   for (const prefix of providers) {
     const curated = FRONTIER_DEFAULTS.find((id) => id.startsWith(prefix + '/'));
     if (curated && ids.has(curated)) { picked.push(curated); continue; }
-    const newest = newestPerProvider(models, [prefix], 1)[0].models[0];
+    const affordable = models.filter((m) => m.pricing.completion <= MAX_DEFAULT_OUTPUT_PRICE);
+    const newest = newestPerProvider(affordable, [prefix], 1)[0].models[0];
     if (newest) picked.push(newest.id);
   }
   return picked;

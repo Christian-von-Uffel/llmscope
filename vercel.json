@@ -1,7 +1,9 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "rewrites": [
-    { "source": "/e/:id", "destination": "/" }
+    { "source": "/api/:path*", "destination": "https://llmscope.christian-uffel.workers.dev/api/:path*" },
+    { "source": "/e/:id", "destination": "/" },
+    { "source": "/:id([A-Za-z0-9]{6})", "destination": "/" }
   ],
   "headers": [
     {
