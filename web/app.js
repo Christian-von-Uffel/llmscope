@@ -175,6 +175,10 @@ for (const el of document.querySelectorAll('[data-go]')) {
     const to = el.dataset.go;
     if (el.tagName === 'A') e.preventDefault();
     if (to === 'demo') { setStage('app'); ready.then(() => start('mock')); return; }
+    // "Start evaluating" asks for a key only when there is none. A reader who came back to the landing page
+    // from the app already has theirs, in the box or in storage; the key page is reached again through
+    // "Change key", which goes there by name rather than through this.
+    if (to === 'key' && (keyValue() || store.readKey())) { setStage('app'); return; }
     setStage(to);
   });
 }
@@ -895,6 +899,14 @@ function flash(id, text) {
 // ---------- the key ----------
 const keyValue = () => $('apikey').value.trim();
 
+// The Continue button follows the box, whoever filled it. The markup ships it disabled for the empty box a
+// stranger sees; a key put there by boot or by "Change key" has to enable it too, or a reader who walks
+// landing → Start evaluating with a saved key finds their own key in the box and no way past it.
+function fillKey(value) {
+  $('apikey').value = value || '';
+  $('btn-unlock').disabled = !keyValue();
+}
+
 function syncKeyBadge() {
   // The box first: a key entered without "remember" is a real key for this session even though nothing is
   // stored, and a badge that called it "no key" would be telling the reader their run is about to fail.
@@ -1049,10 +1061,10 @@ $('model-all').addEventListener('click', () => {
 $('model-set').addEventListener('change', commitModelSetField);
 $('model-set').addEventListener('blur', (e) => { if (!e.relatedTarget?.closest?.('#model-list')) commitModelSetField(); });
 
-$('apikey').addEventListener('input', () => { $('btn-unlock').disabled = !keyValue(); $('key-status').textContent = ''; });
+$('apikey').addEventListener('input', () => { fillKey($('apikey').value); $('key-status').textContent = ''; });
 $('apikey').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); continueWithKey(); } });
 $('btn-unlock').addEventListener('click', () => continueWithKey());
-$('btn-change-key').addEventListener('click', () => { $('apikey').value = store.readKey(); $('btn-unlock').disabled = !keyValue(); setStage('key'); });
+$('btn-change-key').addEventListener('click', () => { fillKey(store.readKey()); setStage('key'); });
 
 $('btn-run-as-is').addEventListener('click', () => leaveResolved(true));
 $('btn-change-first').addEventListener('click', () => leaveResolved(false));
@@ -1141,7 +1153,7 @@ $('load-results').addEventListener('change', async (e) => {
 const ready = (async () => {
   await textReady; // fonts and canvas measurement, before anything is laid out
   const saved = store.readKey();
-  if (saved) { $('apikey').value = saved; $('remember').checked = true; }
+  if (saved) { fillKey(saved); $('remember').checked = true; }
   syncKeyBadge();
   renderVariables();
   toggleMetricFields();
