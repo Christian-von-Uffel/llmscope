@@ -21,7 +21,7 @@ const DEFAULTS = Object.freeze({
   disparity_threshold: null, // null => 0.25 for rates, 0.3 for sentiment
   seed: null,
   // analysis / presentation only (not part of the ID). Card wording is fixed on purpose so images are comparable.
-  sentiment_analyzer: 'builtin', // builtin | afinn | http(s)://url | ./module.js
+  sentiment_analyzer: 'afinn', // afinn | builtin | http(s)://url | ./module.js — see checks/sentiment.js
   card_title: null, // null: whatever the default heading is (see defaultCardTitle) · finding: the sentence · prompt: the prompts
   share_base: 'llmscope.dev/e/',
 });

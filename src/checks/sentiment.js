@@ -1,11 +1,19 @@
-// Pluggable sentiment. Default is a small built-in affect lexicon aimed at how people are described
-// (safety/threat, warmth/hostility). It is a baseline, not a research instrument: plug in your own.
+// Sentiment: the score a reply gets, and the words it got it for.
+//
+// Two word lists ship with llmscope, and both front ends can score with either. AFINN-165 is the default: Finn
+// Årup Nielsen's general-purpose list of 3,382 words and phrases scored −5 to +5, read from the `sentiment`
+// package's table. The built-in list is a few hundred words aimed at how people are described — safety and
+// threat, warmth and hostility — narrower, and closer to tone than to topic. One rule scores both (a negator up
+// to two words back flips a word and halves it), so a run's numbers and the words card drawn from its replies
+// agree with each other, and the browser scores exactly as the CLI does. Neither is a research instrument: plug
+// in your own, and everything that reads the score reads yours.
 //
 //   import { setSentimentAnalyzer } from './checks/sentiment.js'
 //   setSentimentAnalyzer(async (text) => ({ score, comparative }))         // any function
 //   setSentimentAnalyzer(httpSentiment('http://localhost:8000/sentiment'))  // POST {text} -> {score, comparative?}
+import AFINN from 'sentiment/languages/en/labels.json' with { type: 'json' };
 
-const LEXICON = {
+const BUILTIN = {
   // threat / discomfort
   threatened: -3, threatening: -3, menacing: -3, dangerous: -3, danger: -3, unsafe: -3, attack: -3, attacked: -3, assault: -3, violent: -3, violence: -3,
   predator: -3, predatory: -3, criminal: -3, crime: -2, suspicious: -2, suspect: -2, hostile: -2, aggressive: -2, aggression: -2, intimidating: -2, intimidated: -2,
@@ -28,16 +36,37 @@ const LEXICON = {
   good: 1, positive: 1, fine: 1, okay: 1, ok: 1, well: 1, great: 2, wonderful: 3, love: 3, loved: 3, care: 1, caring: 2, helpful: 2, supportive: 2, empowered: 2, proud: 2, free: 1, freedom: 2,
 };
 
+/**
+ * The word lists a run can be scored with, by the name a spec's `sentiment_analyzer` and the CLI's `--lexicon`
+ * use for them. `name` is what a run records as its analyzer, `title` how an image names the list, and `legend`
+ * what its two colours mean on the words card: AFINN scores words for how good or bad they are, the built-in
+ * list for how safe or threatened a person sounds, and a key that said "positive" over the second would be
+ * claiming more than the list knows.
+ */
+export const LEXICONS = {
+  afinn: { name: 'afinn-165', title: 'AFINN-165', words: AFINN, legend: { positive: 'scored positive', negative: 'scored negative' } },
+  builtin: { name: 'builtin-lexicon', title: 'built-in lexicon', words: BUILTIN, legend: { positive: 'warmth / safety word', negative: 'threat / discomfort word' } },
+};
+export const DEFAULT_LEXICON = 'afinn';
+
 const NEGATORS = new Set(['not', 'no', 'never', "isn't", "doesn't", "wasn't", "aren't", "don't", 'without', 'hardly', 'nor', "won't", "wouldn't", 'neither']);
 
-export function lexiconSentiment(text, lexicon = LEXICON) {
-  const words = (text || '').toLowerCase().replace(/[^a-z'\s-]/g, ' ').split(/\s+/).filter(Boolean);
+/** A text as the lists see it: lower case, letters, apostrophes and hyphens; everything else is a space. */
+export const lexiconTokens = (text) => String(text || '').toLowerCase().replace(/[^a-z'\s-]/g, ' ').split(/\s+/).filter(Boolean);
+
+/**
+ * Score a text against one of the lists. `positive` and `negative` are the words that counted, in reading order
+ * and after negation — "not safe" puts "safe" among the negatives — so what the score was made of can be read,
+ * counted and drawn.
+ */
+export function lexiconSentiment(text, lexicon = LEXICONS.builtin) {
+  const words = lexiconTokens(text);
   let score = 0;
   const positive = [];
   const negative = [];
   for (let i = 0; i < words.length; i++) {
     const w = words[i];
-    let val = lexicon[w];
+    let val = lexicon.words[w];
     if (val === undefined) continue;
     const prev = words[i - 1];
     const prev2 = words[i - 2];
@@ -46,18 +75,20 @@ export function lexiconSentiment(text, lexicon = LEXICON) {
     (val > 0 ? positive : negative).push(w);
   }
   const comparative = words.length ? score / words.length : 0;
-  return { score, comparative: Number(comparative.toFixed(4)), words: words.length, positive, negative, analyzer: 'builtin-lexicon' };
+  return { score, comparative: Number(comparative.toFixed(4)), words: words.length, positive, negative, analyzer: lexicon.name };
 }
 
-let analyzer = async (text) => lexiconSentiment(text);
+// A plugged-in analyzer — a service, a module, a function — outranks the lists: whoever plugged it in asked for
+// its numbers. Nothing plugged in, and the run is scored with the list its spec names.
+let plugged = null;
 
 export function setSentimentAnalyzer(fn) {
   if (typeof fn !== 'function') throw new Error('setSentimentAnalyzer expects a function (text) => {score, comparative}');
-  analyzer = fn;
+  plugged = fn;
 }
 
 export function resetSentimentAnalyzer() {
-  analyzer = async (text) => lexiconSentiment(text);
+  plugged = null;
 }
 
 /** HTTP plugin: POST {text} to your service; it returns {score, comparative?, label?}. */
@@ -72,26 +103,19 @@ export function httpSentiment(url, { fetchImpl = globalThis.fetch, headers = {} 
   };
 }
 
-export async function analyzeSentiment(text) {
-  const out = await analyzer(text);
+/**
+ * The sentiment of a text: the plugged-in analyzer's if there is one, else the list `choice` names — a spec's
+ * `sentiment_analyzer` — and AFINN-165 when it names none of them, which is what a service or module URL does
+ * in a spec run somewhere the plugin was never set up.
+ */
+export async function analyzeSentiment(text, choice = DEFAULT_LEXICON) {
+  const out = plugged ? await plugged(text) : lexiconSentiment(text, LEXICONS[choice] || LEXICONS[DEFAULT_LEXICON]);
   return { score: Number(out.score ?? 0), comparative: Number(out.comparative ?? 0), ...out };
 }
 
-/** AFINN-165 via the optional `sentiment` npm package (Node only). */
-export async function afinnSentiment() {
-  let mod;
-  try { mod = await import('sentiment'); } catch { throw new Error('AFINN analyzer needs the `sentiment` package: npm install sentiment'); }
-  const Sentiment = mod.default || mod;
-  const inst = new Sentiment();
-  return async (text) => {
-    const r = inst.analyze(text || '');
-    return { score: r.score, comparative: r.comparative, positive: r.positive, negative: r.negative, analyzer: 'afinn-165' };
-  };
-}
-
 export const SENTIMENT_CHOICES = [
-  { value: 'builtin', name: 'Built-in lexicon', description: 'Small threat/warmth word list shipped with llmscope. Deterministic, no install.' },
-  { value: 'afinn', name: 'AFINN-165 (sentiment package)', description: 'General-purpose lexicon, ~3,300 words. npm install sentiment.' },
+  { value: 'afinn', name: 'AFINN-165', description: 'General-purpose word list: 3,382 words scored −5 to +5. Deterministic, ships with llmscope. The default.' },
+  { value: 'builtin', name: 'Built-in threat/warmth lexicon', description: 'A few hundred words about how people are described: safety and threat, warmth and hostility.' },
   { value: 'http', name: 'HTTP service', description: 'POST {text} to a URL you run; it returns {score, comparative}.' },
   { value: 'module', name: 'JavaScript module', description: 'A file exporting async (text) => ({score, comparative}).' },
 ];

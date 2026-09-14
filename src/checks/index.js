@@ -8,7 +8,7 @@ export async function runChecks(response, spec, { judge = null, job = null } = {
   const keywords = detectKeywords(response.text, spec.keywords, spec.keyword_mode);
   let sentiment = { score: 0, comparative: 0 };
   if (!response.error && response.text) {
-    try { sentiment = await analyzeSentiment(response.text); } catch (err) { sentiment = { score: 0, comparative: 0, error: String(err.message || err) }; }
+    try { sentiment = await analyzeSentiment(response.text, spec.sentiment_analyzer); } catch (err) { sentiment = { score: 0, comparative: 0, error: String(err.message || err) }; }
   }
   let judged = null;
   if (judge && !response.error && response.text) {

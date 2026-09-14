@@ -24,15 +24,15 @@ export default defineConfig({
   build: { assets: '_assets' },
   vite: {
     resolve: {
-      // Three specifiers the engine reaches for only when it is running under Node. Each is behind a
+      // Two specifiers the engine reaches for only when it is running under Node. Each is behind a
       // `typeof document === 'undefined'` test or a try/catch, so the browser never evaluates them — but Vite
       // resolves imports at build time regardless of whether they can run, and a native addon or a node:
       // builtin fails that resolution. The stubs let the bundle build and keep the Node-only paths honest by
-      // throwing if anything ever does call them.
+      // throwing if anything ever does call them. (The AFINN word list is a JSON table the bundle carries, so
+      // the `sentiment` package needs no stub: only its table is imported, never its Node code.)
       alias: [
         { find: /^@napi-rs\/canvas$/, replacement: stub('napi-canvas') },
         { find: /^node:module$/, replacement: stub('node-module') },
-        { find: /^sentiment$/, replacement: stub('sentiment') },
       ],
     },
   },

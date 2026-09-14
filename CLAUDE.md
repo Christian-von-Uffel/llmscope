@@ -30,7 +30,7 @@ main thing to get right here.
 |---|---|
 | anything under `src/` | `npm test` |
 | a renderer, a check, or `src/images.js` | `npm test` — `test/samples.test.js` will say if the samples are stale; then `node scripts/build-samples.mjs` and commit `assets/samples/` |
-| what a run writes, or the browser's tabs | edit `src/images.js` only; check `README.md`, which names the tabs and the files in prose (search for "Card / Keywords" and "Where things go") |
+| what a run writes, or the browser's tabs | edit `src/images.js` only; check `README.md`, which names the tabs and the files in prose (search for "Card / Words" and "Where things go") |
 | `web/`, `site/`, or `src/` code the page uses | `npm run build`, then look at it: `llmscope serve` serves `dist/` on 5173, `npm run dev` runs Astro on 4321 (`.claude/launch.json` has both) |
 | `bin/llmscope.js` help text or the README | keep the two saying the same thing; `test/cli.test.js` greps the help |
 

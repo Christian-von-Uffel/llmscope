@@ -22,14 +22,19 @@ export const PNG_WIDTH = 1200;
 export const pngName = (file) => file.replace(/\.svg$/, '.png');
 
 // Each sample answers a different question, so they come from different runs rather than views of one: a
-// refusal card that splits by identity, a sheet of replies where the marks actually land, the ends of every
-// reply in a run with several wordings and enough models for the sheet to read across as well as down, and the
-// keyword card of a run where two models reached for a word on one wording and not the others. Every one is
-// drawn through the catalogue, at the defaults a run is drawn with, except where a sample says otherwise: no
-// display names, so the samples need no catalogue fetch.
+// refusal card that splits by identity, the words card of that same run — the answer that the refusal grid
+// no longer gives when nothing is refused — a sheet of replies where the marks actually land, the ends of
+// every reply in a run with several wordings and enough models for the sheet to read across as well as down,
+// and the keyword card of a run where two models reached for a word on one wording and not the others. Every
+// one is drawn through the catalogue, at the defaults a run is drawn with, except where a sample says
+// otherwise: no display names, so the samples need no catalogue fetch.
 export const SAMPLES = [
   // No title given, so the sample is the card a run draws by default: the prompt at the head, no finding stated.
   { file: 'card.svg', run: 'D5a3G9', kind: 'card', opts: {} },
+  // The words card of the same run, so the page shows the two images one run leaves side by side. That run was
+  // scored with the built-in list before AFINN-165 became the default, so the sample names the default list
+  // rather than following the run, as `llmscope render D5a3G9 --lexicon afinn` would.
+  { file: 'words.svg', run: 'D5a3G9', kind: 'words', opts: { lexicon: 'afinn' } },
   // Only the replies that matched, cut to the sentences that matched: the marks, where they land.
   { file: 'responses.svg', run: 'dbo50g', kind: 'responses', opts: { size: 1400, select: 'matched', excerpt: 'matches' } },
   // The image every run writes beside the full sheet, as `llmscope sheet <id> --excerpt ends` re-makes it.

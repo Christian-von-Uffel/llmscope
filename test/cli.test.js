@@ -28,6 +28,9 @@ test('one-line run with flags, mock provider, no TTY: writes results, svg, png a
   const ends = await fs.readFile(path.join(tmp, 'out', `${id}.ends.svg`), 'utf8');
   assert.ok(ends.includes('showing the first and last sentence of each reply'), 'and the first and last sentences of every reply, on an image of its own');
   assert.match(stdout, /ends: .*\.ends\.svg/);
+  const words = await fs.readFile(path.join(tmp, 'out', `${id}.words.svg`), 'utf8');
+  assert.ok(words.includes('llmscope · refusal rate · words') && words.includes('AFINN-165'), 'and the words card, counted against AFINN-165 by default');
+  assert.match(stdout, /words: .*\.words\.svg/);
   // The spec is filed under the eval's own id, which is not the run's: a run is one generation of replies.
   const evalId = /spec saved to evals\/([0-9A-Za-z]{6})\.json/.exec(stdout)?.[1];
   assert.ok(evalId && evalId !== id, 'the eval is saved under its own content-addressed id:\n' + stdout);
@@ -77,6 +80,7 @@ test('key --show reports no key; expand works with flags; help lists commands', 
   assert.match(stdout, /2 requests in the order they will be sent/);
   assert.match((await cli('help')).stdout, /llmscope new/);
   assert.match((await cli('help')).stdout, /Models recall the same way/);
+  assert.match((await cli('help')).stdout, /--lexicon afinn\|builtin/);
 });
 
 test('examples list the values each slot will be filled with, and the flag that swaps them', async () => {
