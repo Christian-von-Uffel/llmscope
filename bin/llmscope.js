@@ -15,7 +15,7 @@ import { shareText, altText, PLATFORM_MAX_BYTES } from '../src/share.js';
 import { ensureText, fontFilePaths, FONT_SANS } from '../src/text.js';
 import { usedVariables, normalizeSpec, specId, strayBraces, isSlotToken, defaultCardTitle, displayTemplate, REASONING_EFFORTS } from '../src/spec.js';
 import { freshId } from '../src/id.js';
-import { createOpenRouterProvider, checkKey, maskKey } from '../src/providers/openrouter.js';
+import { createOpenRouterProvider, checkKey, maskKey, fetchBalance, OPENROUTER_CREDITS_URL } from '../src/providers/openrouter.js';
 import { createMockProvider } from '../src/providers/mock.js';
 import { setSentimentAnalyzer, resetSentimentAnalyzer, httpSentiment, afinnSentiment, SENTIMENT_CHOICES } from '../src/checks/sentiment.js';
 import { createJudge } from '../src/checks/judge.js';
@@ -227,14 +227,28 @@ async function ensureKey({ flag, allowPrompt = true } = {}) {
   console.log(`\n${bold('OpenRouter API key')}  ${dim('create one at https://openrouter.ai/keys — it is only ever sent to openrouter.ai')}`);
   const key = (await password({ message: 'Paste your key:', mask: '•', validate: (v) => (v.trim().startsWith('sk-or-') ? true : 'OpenRouter keys start with sk-or-') })).trim();
   process.stderr.write(dim('checking… '));
-  const info = await checkKey({ apiKey: key });
-  if (info.ok) console.log(green(`ok`) + dim(info.label ? ` (${info.label}, used ${formatUsd(info.usage || 0)}${info.limit != null ? ` of ${formatUsd(info.limit)}` : ''})` : ''));
+  const [info, balance] = await Promise.all([checkKey({ apiKey: key }), fetchBalance({ apiKey: key })]);
+  if (info.ok) console.log(green(`ok`) + dim(`${info.label ? ` (${info.label}, used ${formatUsd(info.usage || 0)}${info.limit != null ? ` of ${formatUsd(info.limit)}` : ''})` : ''}${balance.ok ? ` · ${balanceWords(balance)}` : ''}`));
   else console.log(red(`could not verify: ${info.error}`) + dim(' (continuing anyway)'));
   if (await confirm({ message: `Save it to ${configPath()} for next time?`, default: true })) {
     await updateConfig({ openrouter_api_key: key });
     console.log(dim('saved (file mode 0600)'));
   }
   return { key, source: 'prompt' };
+}
+
+/** "$1.20 left on OpenRouter", naming the key's own limit when that is what stops a run first. */
+function balanceWords(balance) {
+  return `${formatUsd(balance.remaining)} in credits left${balance.ceiling === 'key' ? ' under this key\'s spend limit' : ''}`;
+}
+
+/** The balance beside a cost: plain when the run fits, red with the place to top up when it does not. */
+function balanceNote(balance, cost) {
+  if (!balance?.ok) return '';
+  if (cost != null && balance.remaining < cost) {
+    return red(` · only ${balanceWords(balance)}`) + dim(` — ${balance.ceiling === 'key' ? 'raise the limit or ' : ''}add credits at ${OPENROUTER_CREDITS_URL}`);
+  }
+  return dim(` · ${balanceWords(balance)}`);
 }
 
 async function buildProvider(args) {
@@ -301,7 +315,7 @@ function printErrors(run) {
   console.log(`\n${amber(`${errors.length} of ${run.results.length} replies had no answer`)} ${dim('(gray on the card)')}`);
   for (const [msg, n] of groups) console.log(`  ${String(n).padStart(3)} × ${msg}${msg.length >= 90 ? '…' : ''}`);
   if (errors.some((r) => /cut off/.test(r.error))) console.log(dim('  → thinking models used the whole output cap reasoning: raise --thinking (default 8000), or lower --reasoning'));
-  if (errors.some((r) => /402|credits/.test(r.error))) console.log(dim('  → OpenRouter refused for credit reasons: add credits or lower --concurrency 1'));
+  if (errors.some((r) => /402|credits/.test(r.error))) console.log(dim(`  → OpenRouter refused for credit reasons: add credits at ${OPENROUTER_CREDITS_URL}, or lower --concurrency 1`));
   if (errors.some((r) => /429|rate/i.test(r.error))) console.log(dim('  → rate limited: lower --concurrency'));
 }
 
@@ -621,6 +635,8 @@ async function execute(inputSpec, args = {}) {
   // one is content-addressed and names the file in evals/, and the same eval run twice is two runs, two ids.
   const runId = await freshId(plan.id);
   const provider = await buildProvider(args);
+  // Read once for the review: the estimate is where a reader decides to spend, so the balance belongs beside it.
+  const balance = provider.balance ? await provider.balance() : null;
   const review = () => {
     const variants = plan.jobs.length / plan.spec.prompts.length / plan.spec.models.length / plan.spec.runs;
     const shape = `${plan.spec.prompts.length} prompt${plan.spec.prompts.length > 1 ? 's' : ''} × ${variants} variant${variants > 1 ? 's' : ''} × ${plan.spec.models.length} model${plan.spec.models.length > 1 ? 's' : ''} × ${plan.spec.runs} run${plan.spec.runs > 1 ? 's' : ''}`;
@@ -629,6 +645,7 @@ async function execute(inputSpec, args = {}) {
       const cost = estimateCost(plan, list);
       costLine = list.length ? `est. ≈${formatUsd(cost.typical)} ${dim(`(up to ${formatUsd(cost.high)} if every reply used its whole budget)`)}` : 'cost unknown (model list unavailable)';
       if (cost.unknown.length) costLine += red(` · not on OpenRouter: ${cost.unknown.join(', ')}`);
+      costLine += balanceNote(balance, list.length ? cost.typical : null);
     }
     printReview(plan, provider, shape, costLine, specTarget(plan, args), runId);
   };
@@ -693,6 +710,10 @@ async function execute(inputSpec, args = {}) {
   run.sentiment_analyzer = analyzerName;
   const { analysis, paths, sheet, keywords } = await writeOutputs(run, { outDir: args['out-dir'] || 'out', out: args.out, svg: args.svg, png: args.png === 'none' ? false : args.png, url: args.url, highlight: highlightTerms(args), excerpt: excerptMode(args), sort: sortMode(args) });
   printSummary(analysis);
+  if (provider.balance) {
+    const after = await provider.balance();
+    if (after.ok) console.log(`${bold('balance')} ${formatUsd(after.remaining)} ${dim(`in credits left${after.ceiling === 'key' ? ' under this key\'s spend limit' : ''}${after.remaining < (analysis.summary.cost?.usd || 0) ? ` · not enough for another run like this — add credits at ${OPENROUTER_CREDITS_URL}` : ''}`)}`);
+  }
   printProblems(run);
   // Running a file on other models leaves that file alone and writes the eval it actually ran, so it can be rerun.
   const target = specTarget(plan, args);

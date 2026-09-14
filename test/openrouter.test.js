@@ -104,3 +104,46 @@ test('reads reasoning tokens and cost from usage when the provider reports them'
   assert.equal(none.reasoning_tokens, null);
   assert.equal(none.cost, null);
 });
+
+// ---------- the balance ----------
+import { fetchBalance } from '../src/providers/openrouter.js';
+
+/** A fetch answering /credits and /auth/key from the given bodies; anything else is a 404. */
+function balanceFetch({ credits, key, status = 200 } = {}) {
+  return async (url, init) => {
+    assert.equal(init.headers.Authorization, 'Bearer sk-or-v1-test');
+    const body = /\/credits$/.test(url) ? credits : /\/auth\/key$/.test(url) ? key : null;
+    if (!body) return { ok: false, status: 404, json: async () => ({ error: { message: 'not found' } }) };
+    return { ok: status < 400, status, json: async () => (status < 400 ? { data: body } : { error: { message: 'bad key' } }) };
+  };
+}
+
+test('the balance is the account credit left, unless the key has its own limit and less of it', async () => {
+  const opts = { apiKey: 'sk-or-v1-test' };
+  // Plenty on the account, the key uncapped: the account is the ceiling.
+  let b = await fetchBalance({ ...opts, fetchImpl: balanceFetch({ credits: { total_credits: 10, total_usage: 4 }, key: { limit: null, limit_remaining: null } }) });
+  assert.deepEqual(b, { ok: true, remaining: 6, account: 6, key_remaining: null, ceiling: 'account' });
+  // The key capped at $5 with 5 cents left, the account holding $6: the key is the ceiling.
+  b = await fetchBalance({ ...opts, fetchImpl: balanceFetch({ credits: { total_credits: 10, total_usage: 4 }, key: { limit: 5, limit_remaining: 0.05 } }) });
+  assert.equal(b.ceiling, 'key');
+  assert.equal(b.remaining, 0.05);
+  assert.equal(b.account, 6);
+  // Overspent accounts read as nothing left, never as a negative balance.
+  b = await fetchBalance({ ...opts, fetchImpl: balanceFetch({ credits: { total_credits: 5, total_usage: 5.02 }, key: { limit_remaining: null } }) });
+  assert.equal(b.remaining, 0);
+});
+
+test('a balance that cannot be read is reported, not thrown', async () => {
+  assert.deepEqual(await fetchBalance({ apiKey: '' }), { ok: false, error: 'no key' });
+  const b = await fetchBalance({ apiKey: 'sk-or-v1-test', fetchImpl: balanceFetch({ credits: {}, key: {}, status: 401 }) });
+  assert.equal(b.ok, false);
+  assert.match(b.error, /bad key/);
+  const c = await fetchBalance({ apiKey: 'sk-or-v1-test', fetchImpl: async () => { throw new Error('offline'); } });
+  assert.deepEqual(c, { ok: false, error: 'offline' });
+});
+
+test('the provider reads its own balance without handing out the key', async () => {
+  const p = createOpenRouterProvider({ apiKey: 'sk-or-v1-test', models: [], fetchImpl: balanceFetch({ credits: { total_credits: 1, total_usage: 0.25 }, key: {} }) });
+  assert.equal((await p.balance()).remaining, 0.75);
+  assert.equal(p.apiKey, undefined);
+});

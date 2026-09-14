@@ -830,6 +830,8 @@ Models that think by default (GPT, Gemini, Grok, Qwen, Kimi, GLM and others; Cla
 
 **Cost.** Before a run, llmscope shows a typical estimate (short replies plus a stretch of thinking for thinkers) and the ceiling if every reply used its whole budget. After a run, the actual cost as billed by OpenRouter is printed and saved: `cost` on every reply and a `cost` total on the run in `out/<id>.results.json`, plus a `cost_usd` column in the CSV. Runs of the frontier defaults usually land well under a dollar.
 
+**Balance.** Beside the estimate, both the CLI review and the page show what the key can still spend ("$21.20 in credits left"), read live from OpenRouter: the account's remaining credit, or the key's own spending limit when that is the lower of the two, in which case the line says so. When the estimate is more than that, the line turns red and links to [openrouter.ai/settings/credits](https://openrouter.ai/settings/credits). After a run, the new balance is printed next to the actual cost.
+
 ## License
 
 MIT — see [LICENSE](LICENSE). The provider marks are trademarks of their owners and are not covered by it.

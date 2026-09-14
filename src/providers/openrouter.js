@@ -84,6 +84,8 @@ export function createOpenRouterProvider({
   }
   return {
     name: 'openrouter',
+    /** What this key can still spend, read live; see fetchBalance. */
+    balance: () => fetchBalance({ apiKey, baseUrl, fetchImpl }),
     async complete({ model, system, prompt, temperature = 0, max_tokens = 400, thinking_budget = 0, reasoning = 'default', seed = null, signal } = {}) {
       const messages = [];
       if (system) messages.push({ role: 'system', content: system });
@@ -162,6 +164,36 @@ export function createOpenRouterProvider({
       return { text: '', tokens: 0, prompt_tokens: 0, reasoning_tokens: null, cost: null, finish_reason: 'error', error: lastErr || 'unknown error', blocked: false, latency_ms: Date.now() - t0, ...sent };
     },
   };
+}
+
+/** Where credits are bought. Shown whenever a run would cost more than the key has left. */
+export const OPENROUTER_CREDITS_URL = 'https://openrouter.ai/settings/credits';
+
+/**
+ * What a run on this key can still spend, in USD. Two ceilings apply and a run stops at whichever comes first:
+ * the account's credit (GET /credits: bought minus used) and the key's own spending limit, when one is set
+ * (GET /auth/key: limit_remaining). `remaining` is the lower of the two and `ceiling` says which one it is, so a
+ * reader who is short can be told whether to buy credit or raise the key's limit. Never throws.
+ */
+export async function fetchBalance({ apiKey, baseUrl = OPENROUTER_URL, fetchImpl = globalThis.fetch } = {}) {
+  if (!apiKey) return { ok: false, error: 'no key' };
+  const get = async (path) => {
+    const res = await fetchImpl(`${baseUrl}${path}`, { headers: { Authorization: `Bearer ${apiKey}` } });
+    const json = await res.json().catch(() => null);
+    if (!res.ok) throw new Error(json?.error?.message || `HTTP ${res.status}`);
+    return json?.data || {};
+  };
+  try {
+    const [credits, key] = await Promise.all([get('/credits'), get('/auth/key')]);
+    const account = typeof credits.total_credits === 'number' && typeof credits.total_usage === 'number'
+      ? Math.max(0, credits.total_credits - credits.total_usage) : null;
+    const key_remaining = typeof key.limit_remaining === 'number' ? Math.max(0, key.limit_remaining) : null;
+    if (account == null && key_remaining == null) return { ok: false, error: 'OpenRouter reported no balance' };
+    const ceiling = account == null || (key_remaining != null && key_remaining < account) ? 'key' : 'account';
+    return { ok: true, remaining: ceiling === 'key' ? key_remaining : account, account, key_remaining, ceiling };
+  } catch (err) {
+    return { ok: false, error: err.message || String(err) };
+  }
 }
 
 /** Validate a key and read its usage/limits: GET /auth/key. Never throws. */

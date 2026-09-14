@@ -13,7 +13,7 @@ import { logoBody, providerOf } from '../src/logos.js';
 import { ensureText, FONT_FILES } from '../src/text.js';
 import { usedVariables, liftInlineVariants, strayBraces, defaultCardTitle, normalizeSpec, CANONICAL_FIELDS } from '../src/spec.js';
 import { isValidId, freshId } from '../src/id.js';
-import { createOpenRouterProvider, checkKey, maskKey } from '../src/providers/openrouter.js';
+import { createOpenRouterProvider, checkKey, maskKey, fetchBalance, OPENROUTER_CREDITS_URL } from '../src/providers/openrouter.js';
 import { createMockProvider } from '../src/providers/mock.js';
 import { fetchModels, pickFrontier, newestPerProvider, estimateCost, formatUsd, priceLabel, FRONTIER_DEFAULTS, MAIN_PROVIDERS, resolveModels, isRunnableModel, cleanModels, formatModels, modelKey } from '../src/models.js';
 import * as store from './store.js';
@@ -33,6 +33,8 @@ const drawn = new Map();
 let view = 'card'; // the image on show: a kind from IMAGES
 let abort = null;
 let modelList = [];
+// What the connected key can still spend, read when the app opens and again after every run. null until read.
+let balance = null;
 let frontier = FRONTIER_DEFAULTS.slice();
 const checked = new Set(frontier);
 const varValues = {}; // remembered per slot name across re-renders
@@ -207,17 +209,21 @@ async function showResolved(found) {
   const plan = await planRun(spec);
   $('resolved-id').textContent = id || plan.id;
   $('resolved-prompt').innerHTML = `&ldquo;${highlightSlots(spec.prompts[0] || '')}&rdquo;`;
-  const rows = evalDetail(spec);
-  rows.push(['Repeats', `${nOf(spec.runs, 'run')} per cell, so ${nOf(plan.jobs.length, 'request')}`]);
-  rows.push(['Your cost', costLine(plan)]);
-  $('resolved-detail').innerHTML = rows.map(([k, v]) =>
-    `<div class="row"><dt>${esc(k)}</dt><dd>${v}</dd></div>`).join('');
+  paintResolvedDetail(spec, plan);
   // The card only exists where the replies do; an eval published as a spec alone has no picture yet.
   const card = $('resolved-card');
   card.hidden = !run;
   document.querySelector('.resolved-grid').classList.toggle('no-card', !run);
   if (run) { await textReady; card.innerHTML = drawImage('card', run, { names: Object.fromEntries(modelList.map((m) => [m.id, m.name])), date: run.finished_at }).svg; }
   setStage('resolved');
+}
+
+function paintResolvedDetail(spec, plan) {
+  const rows = evalDetail(spec);
+  rows.push(['Repeats', `${nOf(spec.runs, 'run')} per cell, so ${nOf(plan.jobs.length, 'request')}`]);
+  rows.push(['Your cost', costLine(plan)]);
+  $('resolved-detail').innerHTML = rows.map(([k, v]) =>
+    `<div class="row"><dt>${esc(k)}</dt><dd>${v}</dd></div>`).join('');
 }
 
 /** The prompt with its slots marked, the way the card marks them. */
@@ -227,7 +233,29 @@ const highlightSlots = (text) => esc(text).replace(/\{[^{}]+\}/g, (m) => `<b>${m
 function costLine(plan) {
   if (!modelList.length || !plan.jobs.length) return '<b>—</b> on your own OpenRouter key';
   const c = estimateCost(plan, modelList);
-  return `<b>≈ ${formatUsd(c.typical)}</b> on your own OpenRouter key`;
+  return `<b>≈ ${formatUsd(c.typical)}</b> on your own OpenRouter key${balanceHtml(c.typical)}`;
+}
+
+// ---------- the balance ----------
+/** "$1.20 left on OpenRouter", naming the key's own limit when that is what stops a run first. */
+const balanceWords = (b) => `${formatUsd(b.remaining)} in credits left${b.ceiling === 'key' ? ' under this key’s spend limit' : ''}`;
+
+/** The balance beside a cost: plain when the run fits, red with the place to top up when it does not. */
+function balanceHtml(cost) {
+  if (!balance?.ok) return '';
+  if (cost != null && balance.remaining < cost) {
+    return ` · <span class="bad">only ${balanceWords(balance)}</span> · <a href="${OPENROUTER_CREDITS_URL}" target="_blank" rel="noopener">${balance.ceiling === 'key' ? 'raise the limit or add credits' : 'add credits'} ↗</a>`;
+  }
+  return ` · ${balanceWords(balance)}`;
+}
+
+/** Read the balance for the key in use and redraw every line that shows it. Nothing to read without a key. */
+async function loadBalance() {
+  const key = keyValue() || store.readKey();
+  balance = key ? await fetchBalance({ apiKey: key }) : null;
+  await refresh();
+  if (resolved && document.documentElement.dataset.stage === 'resolved') paintResolvedDetail(resolved.spec, await planRun(resolved.spec));
+  return balance;
 }
 
 /** Put a resolved eval on the form. Its id becomes the origin every later edit is measured against. */
@@ -539,7 +567,8 @@ async function refresh() {
   if (modelList.length && plan.jobs.length) {
     const c = estimateCost(plan, modelList);
     cost = ` · est. <b>≈${formatUsd(c.typical)}</b> (up to ${formatUsd(c.high)} if every reply used its whole budget)`
-      + (c.unknown.length ? ` · <span class="bad">not on OpenRouter: ${esc(c.unknown.join(', '))}</span>` : '');
+      + (c.unknown.length ? ` · <span class="bad">not on OpenRouter: ${esc(c.unknown.join(', '))}</span>` : '')
+      + balanceHtml(c.typical);
   }
   $('estimate').innerHTML = `<b>${plan.jobs.length}</b> requests · ${esc(shape)}${cost}`;
   syncStepFocus(plan);
@@ -879,9 +908,10 @@ async function verifyKey() {
   if (!key) { el.textContent = 'Paste a key first.'; return { ok: false }; }
   if (!key.startsWith('sk-or-')) { el.textContent = 'OpenRouter keys start with sk-or-'; return { ok: false }; }
   el.textContent = 'checking…';
-  const info = await checkKey({ apiKey: key });
+  const [info, bal] = await Promise.all([checkKey({ apiKey: key }), fetchBalance({ apiKey: key })]);
+  if (info.ok) balance = bal;
   el.innerHTML = info.ok
-    ? `<span class="ok">valid</span>${info.label ? ` · ${esc(info.label)}` : ''} · used ${formatUsd(info.usage || 0)}${info.limit != null ? ` of ${formatUsd(info.limit)}` : ''}`
+    ? `<span class="ok">valid</span>${info.label ? ` · ${esc(info.label)}` : ''} · used ${formatUsd(info.usage || 0)}${info.limit != null ? ` of ${formatUsd(info.limit)}` : ''}${bal.ok ? ` · ${balanceWords(bal)}` : ''}`
     : `<span class="bad">${esc(info.error)}</span>`;
   return info;
 }
@@ -895,6 +925,7 @@ async function continueWithKey() {
   if ($('remember').checked) store.writeKey(keyValue()); else store.clearKey();
   syncKeyBadge();
   setStage('app');
+  refresh(); // the estimate now knows the balance
   if (pendingEval) {
     const { run } = pendingEval;
     pendingEval = null;
@@ -949,10 +980,16 @@ async function start(kind) {
     if (partial.highlight) currentRun.highlight = partial.highlight; // words marked while it streamed stay marked
     paint(currentRun);
     const errors = currentRun.results.filter((r) => r.error).length;
-    $('progress-text').textContent = `${currentRun.results.length} responses · ${currentRun.aborted ? 'stopped' : 'done'} · ${provider.name}`
+    const doneLine = `${currentRun.results.length} responses · ${currentRun.aborted ? 'stopped' : 'done'} · ${provider.name}`
       + `${errors ? ` · ${errors} errors` : ''}${currentRun.cost?.priced ? ` · cost ${formatUsd(currentRun.cost.usd)}` : ''}`;
+    $('progress-text').textContent = doneLine;
     await store.saveRun(currentRun);
     await renderRecent();
+    if (provider.balance) {
+      // What is left after this run, on the line that says what it cost; the estimate below picks it up too.
+      const after = await loadBalance();
+      if (after?.ok) $('progress-text').innerHTML = `${esc(doneLine)} · ${balanceWords(after)}${after.remaining < (currentRun.cost?.usd || 0) ? ` · <a href="${OPENROUTER_CREDITS_URL}" target="_blank" rel="noopener">add credits ↗</a>` : ''}`;
+    }
   } catch (err) {
     problem(String(err.message || err));
   } finally {
@@ -1130,6 +1167,7 @@ const ready = (async () => {
     if (last) await openRun(last, `restored ${last.id}, the last run of this eval`);
   }
   await loadModels();
+  await loadBalance();
   // Last, so the cost on it is the real one rather than a dash the reader has to watch change.
   if (shared) await openEvalRef(shared, null);
 })();
