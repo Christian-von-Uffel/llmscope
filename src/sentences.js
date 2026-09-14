@@ -169,19 +169,20 @@ export function sentenceBatches(responses = [], terms = [], { by = 'group', text
 /**
  * Every refused reply as a line, in the order the replies are given.
  * @param {object[]} responses replies in reading order (card order, from selectResponses)
+ * @param {string[]} [phrases] the eval's own refusal phrases, so a reply they caught has its phrase marked too
  * @returns {Array<{response: object, text: string, reason: string, pattern: boolean, spans: Array<{start:number, end:number}>}>}
  *   text: the sentence the rule matched — or what the provider said, or '' when there is nothing; reason: why it
- *   counts, in words; pattern: whether the model declined in its own words; spans: the phrase that matched, as
- *   offsets into text, so it can be marked
+ *   counts, in words; pattern: whether the model declined in its own words (by a rule or by a phrase the eval
+ *   lists); spans: the phrase that matched, as offsets into text, so it can be marked
  */
-export function refusalLines(responses = []) {
+export function refusalLines(responses = [], phrases = []) {
   const lines = [];
   for (const response of responses) {
     if (!response.refused) continue;
     const text = String(response.refusal_evidence || '').trim();
-    const pattern = !response.refusal_reason || response.refusal_reason === 'pattern';
-    const reason = pattern ? REFUSAL_REASONS.pattern : REFUSAL_REASONS[response.refusal_reason] || String(response.refusal_reason).replace(/_/g, ' ');
-    lines.push({ response, text, reason, pattern, spans: pattern && text ? refusalSpans(text) : [] });
+    const pattern = !response.refusal_reason || response.refusal_reason === 'pattern' || response.refusal_reason === 'phrase';
+    const reason = REFUSAL_REASONS[response.refusal_reason] || (pattern ? REFUSAL_REASONS.pattern : String(response.refusal_reason).replace(/_/g, ' '));
+    lines.push({ response, text, reason, pattern, spans: pattern && text ? refusalSpans(text, phrases) : [] });
   }
   return lines;
 }
@@ -193,11 +194,12 @@ export function refusalLines(responses = []) {
  * counts. Batches keep the order the responses arrived in, which is the card's.
  * @param {object} [opts]
  * @param {'group'|'model'} [opts.by]
+ * @param {string[]} [opts.phrases] the eval's own refusal phrases
  * @returns {{batches: Array<{key: string, label: string, lines: object[], refused: number, replies: number, models: string[], refusers: string[]}>, refused: number, replies: number, lines: object[]}}
  *   models: every model asked in the batch; refusers: the ones that declined
  */
-export function refusalBatches(responses = [], { by = 'group' } = {}) {
-  const lines = refusalLines(responses);
+export function refusalBatches(responses = [], { by = 'group', phrases = [] } = {}) {
+  const lines = refusalLines(responses, phrases);
   const { key, label } = KEYED[by] || KEYED.group;
   const batches = new Map();
   for (const r of responses) {

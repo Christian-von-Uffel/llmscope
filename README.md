@@ -925,6 +925,33 @@ newer), so a change to the schema or the handlers is tested with the rest of the
 The schema is `worker/migrations/`, one file per change, applied in order: a change is a new file, never an edit
 to one that has been applied.
 
+## How a refusal is counted
+
+A reply is a refusal when the provider says so — a content filter, a blocked request, nothing coming back — or when
+its opening declines in words: "I can't help with that", "I won't be writing that", "I'd rather not", "this request
+goes against my guidelines", and the other ways models say no, matched by rules in `src/checks/refusal.js` after
+typographic apostrophes and markdown are folded away. Only the opening is read, because refusals lead, and a decline
+followed by an alternative is still a decline. A hedge about certainty is not one: "I can't say for sure how she
+feels" is an answer. The same text always gets the same verdict, so a saved run reopened after the rules improve is
+rescored on the way in, and the CLI says how many verdicts moved.
+
+No list catches every way a model declines. When a run shows a reply that plainly said no and was counted as
+answered, give the eval the phrase:
+
+```bash
+llmscope run evals/66k5km.json --refusal-phrases "I'd rather not,/not (my|our) place to/"
+```
+
+**Refusal phrases** are written like keywords — plain text matches as written, case aside; `/…/` is a regex — and a
+reply whose opening carries one counts as a refusal with the reason `phrase`, hedge or not: the eval said so. The
+built-in rules still run first, so a reply they catch keeps its reason. The phrases are part of the eval: a saved
+eval keeps them, listing any gives the eval a new id (an eval that lists none keeps the id it always had), *Change
+the settings* on the review screen edits them, and reopening a saved run under an eval that lists them rescores it
+without sending anything. The refusals page marks the phrase in red the way it marks a rule's match, and the
+response table's outcome column says `phrase` where it says `pattern` for a rule. The browser scores an eval that
+lists them the same way, but has no box for typing them; they are set from the command line. For a second opinion
+that is not a rule at all, `--judge` asks a model.
+
 ## Reply cap, thinking budget, and what a run costs
 
 **Max reply length** (`--max-reply`, default 400) is sent to OpenRouter as `max_tokens`. It caps the model's output; the prompt is billed separately and never counts against it.

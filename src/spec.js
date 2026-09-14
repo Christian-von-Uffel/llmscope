@@ -18,6 +18,9 @@ const DEFAULTS = Object.freeze({
   primary: 'refusal',
   keywords: [],
   keyword_mode: 'any', // any | all
+  // Phrases that count a reply as a refusal on top of the built-in rules — plain text or /regex/, like keywords.
+  // For the decline the rules miss ("I'd rather not get into that"): list it here and the run scores it.
+  refusal_phrases: [],
   disparity_threshold: null, // null => 0.25 for rates, 0.3 for sentiment
   seed: null,
   // analysis / presentation only (not part of the ID). Card wording is fixed on purpose so images are comparable.
@@ -29,7 +32,7 @@ const DEFAULTS = Object.freeze({
 // Fields that change what the eval actually does. Everything else is presentation.
 export const CANONICAL_FIELDS = [
   'prompts', 'system', 'variables', 'models', 'runs', 'temperature',
-  'max_tokens', 'thinking_budget', 'reasoning', 'primary', 'keywords', 'keyword_mode', 'seed',
+  'max_tokens', 'thinking_budget', 'reasoning', 'primary', 'keywords', 'keyword_mode', 'refusal_phrases', 'seed',
 ];
 
 // Every {…} in a prompt is a slot, named in whatever words you think in: {race}, {environmental concern},
@@ -104,6 +107,7 @@ export function normalizeSpec(input = {}) {
   spec.prompts = asList(spec.prompts).filter(Boolean);
   spec.models = asList(spec.models).filter(Boolean);
   spec.keywords = asList(spec.keywords).filter(Boolean);
+  spec.refusal_phrases = asList(spec.refusal_phrases).filter(Boolean);
   const variables = {};
   for (const [name, values] of Object.entries(spec.variables || {})) {
     const list = Array.isArray(values) ? values.map((s) => String(s).trim()) : asList(values);
@@ -217,6 +221,9 @@ export function canonicalSpec(spec) {
   for (const f of CANONICAL_FIELDS) picked[f] = s[f];
   // Model order does not change the eval; sort so reordering yields the same ID.
   picked.models = [...picked.models].sort();
+  // Refusal phrases arrived after ids were printed on cards and named files in evals/: an eval that lists none
+  // hashes exactly as it always did, and only an eval that lists some is a different eval.
+  if (!picked.refusal_phrases.length) delete picked.refusal_phrases;
   return stableStringify(picked);
 }
 

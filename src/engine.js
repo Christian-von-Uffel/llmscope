@@ -129,7 +129,7 @@ export function rescoreRun(run) {
       r.error = `cut off: used the whole output cap (${r.max_tokens_sent ?? spec.max_tokens} tokens) before answering; thinking models spend it reasoning first — raise the thinking budget`;
     }
     if (!r.judge || typeof r.judge.refused !== 'boolean') {
-      const v = detectRefusal({ text: r.text, error: r.error, blocked: false, finish_reason: r.finish_reason, api_refusal: null });
+      const v = detectRefusal({ text: r.text, error: r.error, blocked: false, finish_reason: r.finish_reason, api_refusal: null }, spec.refusal_phrases);
       r.refused = v.refused; r.refusal_reason = v.reason; r.refusal_evidence = v.evidence; r.heuristic_refused = v.refused;
     }
     const k = detectKeywords(r.text, spec.keywords, spec.keyword_mode);

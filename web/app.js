@@ -542,7 +542,7 @@ const problem = (msg) => { $('problems').hidden = !msg; $('problems').textConten
  */
 const FIELD_NAMES = {
   prompts: 'prompt wording', variables: 'slot values', models: 'models', runs: 'runs per cell',
-  primary: 'the measure', keywords: 'keywords', keyword_mode: 'how keywords count',
+  primary: 'the measure', keywords: 'keywords', keyword_mode: 'how keywords count', refusal_phrases: 'refusal phrases',
   system: 'system prompt', temperature: 'temperature', max_tokens: 'reply cap',
   thinking_budget: 'thinking budget', reasoning: 'reasoning effort', seed: 'seed',
 };
@@ -694,6 +694,10 @@ function renderResponses(run) {
       + `<td class="resp clip" title="click to expand">${body}</td>`;
     tr.querySelector('.resp').addEventListener('click', (e) => {
       const td = e.currentTarget;
+      // A click that ends a drag across the text is someone copying a snippet, not asking for the rest of the
+      // reply: opening or closing the cell under them would throw the selection away.
+      const sel = window.getSelection();
+      if (sel && !sel.isCollapsed && String(sel).trim()) return;
       td.classList.toggle('clip');
       if (!td.classList.contains('clip')) revealMark(td);
     });

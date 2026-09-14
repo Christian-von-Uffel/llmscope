@@ -1258,14 +1258,15 @@ export function renderRefusalSheet(run, { size = 4096, maxFont = null, minFont =
   const { analysis: a, responses } = selectResponses(run, select, by);
   const colors = modelColors(a.rows.map((r) => r.model));
   const shareUrl = url || `${a.spec.share_base || ''}${a.id}`;
-  const found = refusalBatches(responses, { by });
+  const phrases = a.spec?.refusal_phrases || [];
+  const found = refusalBatches(responses, { by, phrases });
   // A refusal with no sentence is listed by its reason; one the provider explained carries the reason and the explanation.
   const batches = found.batches.map((b) => ({
     ...b,
     lines: b.lines.map((l) => ({ ...l, text: collapseEmoji(l.pattern ? l.text : `(${l.reason})${l.text ? ` ${l.text}` : ''}`) })),
   }));
   const leg = legend(a, size, colors, shareUrl, refusalNoteParts(by), { outcomes: false });
-  const paragraphOpts = { layout, voice, clean, spansOf: (text) => refusalSpans(text), countOf: (b) => refusalCount(b, by), perRun: (items) => items.length, markColor: REFUSAL_MARK };
+  const paragraphOpts = { layout, voice, clean, spansOf: (text) => refusalSpans(text, phrases), countOf: (b) => refusalCount(b, by), perRun: (items) => items.length, markColor: REFUSAL_MARK };
   const fitWith = (h, cap) => fitPage(
     (f, colW) => lineRanges(sentenceParagraphs(batches, a, colors, f, [], by, markStyle, heading, name, h.block.size, paragraphOpts), colW),
     { size, headerH: h.headerH, legendH: leg.height, columns, minFont, maxFont: cap },
