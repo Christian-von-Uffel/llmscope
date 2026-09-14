@@ -320,7 +320,9 @@ slack, and there it makes the heading shorter, not taller.
 **Word cloud image.** Every run writes it beside the card (`llmscope render <id>` re-makes it; the browser shows it
 under Word cloud). One cloud per wording, in the card's column order: the words the wording's replies were scored
 on, sized by the share of replies that used them — a word half the replies used is full size in any panel, so
-size compares across panels — and green or red by which way they scored, after negation. Words the prompt itself
+size compares across panels — and green or red by which way they scored, after negation. The two are a light
+green and a coral red chosen in OKLCH: both clear 4.5:1 on the panel for every kind of colour vision, and they sit a
+lightness step apart, so they stay two colours where red and green stop being two hues. Words the prompt itself
 contains are left out, so a model told to "write two sentences" does not score "sentences" every time, and
 refused replies and errors are not counted. Each panel is fitted by shrinking its type until every word has a
 place; one that still overflows at the smallest readable size draws the words the most replies used and counts
