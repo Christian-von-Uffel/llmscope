@@ -72,6 +72,18 @@ test('every result carries prompt, reply, and total tokens; cell and run totals 
   for (const row of a.rows) for (const cell of row.cells) assert.equal(cell.total_tokens, cell.prompt_tokens_total + cell.tokens_total);
 });
 
+test('rescoreRun applies the eval\'s own refusal phrases, so a decline the rules missed is counted without a rerun', async () => {
+  const run = await runEval(spec, { provider: createMockProvider() });
+  const answered = run.results.find((r) => !r.refused && r.text);
+  const opening = answered.text.split('.')[0].slice(0, 12);
+  run.spec.refusal_phrases = [opening];
+  assert.ok(rescoreRun(run) >= 1, 'at least that reply changed verdict');
+  const r = run.results.find((x) => x.position === answered.position);
+  assert.deepEqual([r.refused, r.refusal_reason, r.heuristic_refused], [true, 'phrase', true]);
+  assert.ok(r.refusal_evidence.toLowerCase().includes(opening.toLowerCase()), r.refusal_evidence);
+  assert.deepEqual(run.spec.refusal_phrases, [opening], 'the phrases stay on the run');
+});
+
 test('rescoreRun backfills total_tokens on runs saved before it existed', async () => {
   const run = await runEval(spec, { provider: createMockProvider(), concurrency: 1 });
   for (const r of run.results) delete r.total_tokens;

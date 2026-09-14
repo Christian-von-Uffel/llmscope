@@ -114,10 +114,12 @@ button:disabled, .btn:disabled { opacity: .42; cursor: not-allowed; }
 /* Two by two: the two cards over the two sheets, each wide enough for a sheet's text to be read at all. */
 .shots { display: grid; grid-template-columns: repeat(2, 1fr); gap: 22px; }
 .shots figure { margin: 0; }
-.shots a { display: block; background: #0f1113; border: 1px solid var(--line-strong); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+.shots figure > a { display: block; background: #0f1113; border: 1px solid var(--line-strong); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
 .shots img { display: block; width: 100%; aspect-ratio: 1; object-fit: contain; }
 .shots figcaption { margin-top: 12px; font-size: 14px; color: var(--muted); }
 .shots figcaption b { color: var(--text); }
+/* The eval each image came from, under its caption: the way from looking at a result to running the same eval. */
+.shots .eval-link { display: block; margin-top: 6px; font-weight: 600; }
 /* An odd count leaves the last figure alone on its row: centre it at the width of the others rather than let it sit in the corner. */
 .shots figure:last-child:nth-child(odd) { grid-column: 1 / -1; width: calc(50% - 11px); margin: 0 auto; }
 /* What a run keeps behind the images, without an image of its own: two notes in the same dress as the features. */

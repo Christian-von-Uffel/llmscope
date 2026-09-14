@@ -158,33 +158,34 @@ try {
 
   <section class="band alt" id="output">
     <h2 class="band-title">Useful bias insights at a glance</h2>
-    <p class="band-lede">See which models exhibit bias, and where. Every run draws its results as images you can read in a second and post as they stand — the layouts are fixed, so two runs always read against each other — and keeps every reply behind them for you to search and export.</p>
+    <p class="band-lede">See which models exhibit bias, and where. Every run draws its results as images you can read in a second and post as they stand — the layouts are fixed, so two runs always read against each other — and keeps every reply behind them for you to search and export. Each image below links to the eval it was drawn from: open it to run the same eval on your own key, or change something first and run your own.</p>
     <!-- Real output from real runs, shown as PNGs set in the fonts they were measured with: see PNG_WIDTH in
-         scripts/samples.mjs for why an <img> of the SVG came out with stretched text. -->
+         scripts/samples.mjs for why an <img> of the SVG came out with stretched text. Each links to the eval it
+         was drawn from, by the id its footer prints; test/samples.test.js holds these ids to scripts/samples.mjs. -->
     <div class="shots">
       <figure>
         <a href="/samples/card.png" target="_blank" rel="noopener"><img src="/samples/card.png" alt="A refusal-rate card: three models by five wordings of the same prompt, each cell shaded by how often the model refused."></a>
-        <figcaption><b>Refusal rate.</b> See which models decline, and which wording of the prompt they decline for.</figcaption>
+        <figcaption><b>Refusal rate.</b> See which models decline, and which wording of the prompt they decline for. <a class="eval-link" href="/D5a3G9">Open eval D5a3G9</a></figcaption>
       </figure>
       <figure>
         <a href="/samples/refusals.png" target="_blank" rel="noopener"><img src="/samples/refusals.png" alt="A refusals sheet: under each wording of one prompt, the models that declined it and the sentence each declined with, the refusing phrase marked in red."></a>
-        <figcaption><b>Refusals.</b> See how a refusal happens: under each wording, every model that declined and the sentence it declined in, with the phrase that made it a refusal marked.</figcaption>
+        <figcaption><b>Refusals.</b> See how a refusal happens: under each wording, every model that declined and the sentence it declined in, with the phrase that made it a refusal marked. <a class="eval-link" href="/D5a3G9">Open eval D5a3G9</a></figcaption>
       </figure>
       <figure>
         <a href="/samples/wordcloud.png" target="_blank" rel="noopener"><img src="/samples/wordcloud.png" alt="A word cloud: five wordings of one prompt, each with a cloud of the words the replies were scored on, sized by how many replies used them and coloured green or red by which way they scored."></a>
-        <figcaption><b>Word cloud.</b> See how the answers differ when nothing is refused: the words each wording draws from the models, sized by how many replies used them, green or red by their sentiment.</figcaption>
+        <figcaption><b>Word cloud.</b> See how the answers differ when nothing is refused: the words each wording draws from the models, sized by how many replies used them, green or red by their sentiment. <a class="eval-link" href="/D5a3G9">Open eval D5a3G9</a></figcaption>
       </figure>
       <figure>
         <a href="/samples/keywords.png" target="_blank" rel="noopener"><img src="/samples/keywords.png" alt="A keyword-matching card: eight models, each with the wording of the prompt that made it reply with a charged word, the word itself, and how many of its responses included it."></a>
-        <figcaption><b>Keyword matching.</b> See where charged words show up: which model reached for them, under which wording, in how many runs.</figcaption>
+        <figcaption><b>Keyword matching.</b> See where charged words show up: which model reached for them, under which wording, in how many runs. <a class="eval-link" href="/mwbXAp">Open eval mwbXAp</a></figcaption>
       </figure>
       <figure>
         <a href="/samples/responses.png" target="_blank" rel="noopener"><img src="/samples/responses.png" alt="A responses sheet: every reply that used a marked word, cut to the sentence it landed in, grouped by wording and coloured by model."></a>
-        <figcaption><b>Responses.</b> See how keywords and phrases affect AI responses: the replies behind the numbers, grouped by wording, with the words you marked highlighted where they land.</figcaption>
+        <figcaption><b>Responses.</b> See how keywords and phrases affect AI responses: the replies behind the numbers, grouped by wording, with the words you marked highlighted where they land. <a class="eval-link" href="/dbo50g">Open eval dbo50g</a></figcaption>
       </figure>
       <figure>
         <a href="/samples/ends.png" target="_blank" rel="noopener"><img src="/samples/ends.png" alt="A first-and-last-sentences sheet: how each of seven models opened its reply to three wordings of one prompt and where it landed, refusals marked with a red cross."></a>
-        <figcaption><b>First and last sentences.</b> See the tone of responses at a glance: how each model opens its reply and where it lands, side by side.</figcaption>
+        <figcaption><b>First and last sentences.</b> See the tone of responses at a glance: how each model opens its reply and where it lands, side by side. <a class="eval-link" href="/GK1zvv">Open eval GK1zvv</a></figcaption>
       </figure>
     </div>
     <div class="extras">

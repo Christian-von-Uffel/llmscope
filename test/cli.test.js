@@ -82,6 +82,7 @@ test('key --show reports no key; expand works with flags; help lists commands', 
   assert.match((await cli('help')).stdout, /llmscope publish <id>/);
   assert.match((await cli('help')).stdout, /Models recall the same way/);
   assert.match((await cli('help')).stdout, /--lexicon afinn\|builtin/);
+  assert.match((await cli('help')).stdout, /--refusal-phrases/);
 });
 
 test('examples list the values each slot will be filled with, and the flag that swaps them', async () => {

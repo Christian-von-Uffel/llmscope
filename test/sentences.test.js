@@ -364,6 +364,14 @@ test('which replies are read can be narrowed, and the words can be any words, no
   assert.equal(matchedOnly.replies, new Set(markedSentences(selectResponses(run, 'matched').responses, terms).map((l) => l.response)).size);
 });
 
+test('a refusal caught by a phrase the eval lists is a line in the model\'s own words, with that phrase marked', () => {
+  const responses = [{ model: 'a', variantKey: 'x', variantLabel: 'x', refused: true, refusal_reason: 'phrase', refusal_evidence: "It's not my place to say how she feels." }];
+  const [line] = refusalLines(responses, ['not my place']);
+  assert.deepEqual([line.pattern, line.reason, line.spans], [true, 'declined in a phrase the eval lists', [{ start: 5, end: 17 }]]);
+  assert.deepEqual(refusalLines(responses)[0].spans, [], 'without the phrases there is nothing to mark');
+  assert.deepEqual(refusalBatches(responses, { phrases: ['not my place'] }).lines[0].spans, [{ start: 5, end: 17 }]);
+});
+
 test('refusals as sentences: every refused reply is a line with the phrase it declined with, batched under its wording', () => {
   const responses = [
     { model: 'a', variantKey: 'x', variantLabel: 'x', refused: true, refusal_reason: 'pattern', refusal_evidence: "I'm sorry, but I can't help with that request." },

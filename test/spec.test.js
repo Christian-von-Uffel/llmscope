@@ -94,6 +94,15 @@ test('validation catches missing values and unused variables', () => {
   assert.ok(p.some((x) => x.includes('{gender}')));
 });
 
+test('refusal phrases read like keywords, change the id when listed, and leave every old id alone when not', async () => {
+  assert.deepEqual(normalizeSpec(base).refusal_phrases, []);
+  assert.deepEqual(normalizeSpec({ ...base, refusal_phrases: "I'd rather not, /no comment/" }).refusal_phrases, ["I'd rather not", '/no comment/']);
+  assert.deepEqual(normalizeSpec({ ...base, refusal_phrases: [' not my place ', ''] }).refusal_phrases, ['not my place']);
+  assert.equal(await specId({ ...base, refusal_phrases: [] }), await specId(base));
+  assert.ok(!canonicalSpec(base).includes('refusal_phrases'), 'absent from the canonical form when empty, so ids printed on cards still stand');
+  assert.notEqual(await specId({ ...base, refusal_phrases: ['no comment'] }), await specId(base));
+});
+
 test('reasoning effort and thinking budget have defaults, reject bad values, and are part of the id', async () => {
   assert.equal(normalizeSpec(base).reasoning, 'default');
   assert.equal(normalizeSpec({ ...base, reasoning: 'bogus' }).reasoning, 'default');

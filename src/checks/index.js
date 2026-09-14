@@ -4,7 +4,7 @@ import { analyzeSentiment } from './sentiment.js';
 
 /** Run every check over a raw provider response. */
 export async function runChecks(response, spec, { judge = null, job = null } = {}) {
-  const refusal = detectRefusal(response);
+  const refusal = detectRefusal(response, spec.refusal_phrases);
   const keywords = detectKeywords(response.text, spec.keywords, spec.keyword_mode);
   let sentiment = { score: 0, comparative: 0 };
   if (!response.error && response.text) {
