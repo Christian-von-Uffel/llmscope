@@ -18,7 +18,7 @@ test('one-line run with flags, mock provider, no TTY: writes results, svg, png a
   const id = /\bid ([0-9A-Za-z]{6})\b/.exec(stdout)?.[1];
   assert.ok(id && /requests\s+8\b/.test(stdout), 'prints the id and request count:\n' + stdout);
   assert.match(stdout, /OF 2 MODELS TESTED DIFFER BY WORDING/);
-  assert.match(stdout, /share: llmscope\.dev\/e\//);
+  assert.match(stdout, /share: llmscope\.dev\/[0-9A-Za-z]{6}\b/, 'the card address is the id at the root of the site');
   const results = JSON.parse(await fs.readFile(path.join(tmp, 'out', `${id}.results.json`), 'utf8'));
   assert.equal(results.results.length, 8);
   assert.ok((await fs.readFile(path.join(tmp, 'out', `${id}.svg`), 'utf8')).startsWith('<svg'));
@@ -79,6 +79,7 @@ test('key --show reports no key; expand works with flags; help lists commands', 
   const { stdout } = await cli('expand', '--prompt', 'Hi {who}', '--var', 'who=a,b', '--models', 'm/one');
   assert.match(stdout, /2 requests in the order they will be sent/);
   assert.match((await cli('help')).stdout, /llmscope new/);
+  assert.match((await cli('help')).stdout, /llmscope publish <id>/);
   assert.match((await cli('help')).stdout, /Models recall the same way/);
   assert.match((await cli('help')).stdout, /--lexicon afinn\|builtin/);
 });
@@ -575,4 +576,110 @@ test('render --stale finds the images a renderer change left behind; --all takes
   const all = await cli('render', '--all', '--find', 'quokka', '--png', 'none');
   assert.match(all.stdout, /re-rendering 1 of 1 run/);
   await assert.rejects(cli('render', '--all', '--svg', 'one.svg'), (err) => /names one file/.test(err.stderr));
+});
+
+test('publish sends a run to the site under a token kept in the config file, and --remove takes it down', async () => {
+  const http = await import('node:http');
+  const seen = [];
+  const server = http.createServer((req, res) => {
+    let body = '';
+    req.on('data', (c) => { body += c; });
+    req.on('end', () => {
+      seen.push({ method: req.method, url: req.url, auth: req.headers.authorization, body });
+      if (req.method === 'DELETE') { res.writeHead(204); return res.end(); }
+      res.writeHead(201, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ id: 'D5a3G9', eval: 'abcdef', replies: 30 }));
+    });
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const site = `http://127.0.0.1:${server.address().port}`;
+  try {
+    // A real run, the one the landing page's sample card is drawn from, as if this machine had run it.
+    await fs.mkdir(path.join(tmp, 'out'), { recursive: true });
+    await fs.copyFile(path.join(ROOT, 'assets', 'samples', 'runs', 'D5a3G9.results.json'), path.join(tmp, 'out', 'D5a3G9.results.json'));
+    const { stdout } = await cli('publish', 'D5a3G9', '--site', site);
+    assert.match(stdout, new RegExp(`published 127\\.0\\.0\\.1:${server.address().port}/D5a3G9`), stdout);
+    assert.equal(seen[0].method, 'PUT');
+    assert.equal(seen[0].url, '/api/runs/D5a3G9');
+    assert.match(seen[0].auth, /^Bearer [0-9a-f]{48}$/);
+    assert.equal(JSON.parse(seen[0].body).results.length, 30, 'the whole run goes up');
+    const cfg = JSON.parse(await fs.readFile(path.join(tmp, 'cfg', 'config.json'), 'utf8'));
+    assert.equal(seen[0].auth, `Bearer ${cfg.publish_token}`, 'the token lives in the config file, so the next publish is the same owner');
+
+    const removed = await cli('publish', 'D5a3G9', '--remove', '--site', site);
+    assert.match(removed.stdout, /removed D5a3G9/);
+    assert.equal(seen[1].method, 'DELETE');
+    assert.equal(seen[1].auth, seen[0].auth);
+
+    // A mock run is a demo and is not sent.
+    const mock = await cli('run', '--prompt', 'Say hi to {who}.', '--var', 'who=a,b', '--models', 'openai/gpt-6-astra', '--provider', 'mock', '--yes', '--png', 'none');
+    const mockId = /\bid ([0-9A-Za-z]{6})\b/.exec(mock.stdout)[1];
+    await assert.rejects(cli('publish', mockId, '--site', site), /is a mock run/);
+    assert.equal(seen.length, 2);
+
+    // A site with no API says so rather than pretending.
+    const plain = http.createServer((req, res) => { res.writeHead(200, { 'content-type': 'text/html' }); res.end('<!doctype html>'); });
+    await new Promise((resolve) => plain.listen(0, '127.0.0.1', resolve));
+    try {
+      await assert.rejects(cli('publish', 'D5a3G9', '--site', `http://127.0.0.1:${plain.address().port}`), /no API answers there/);
+    } finally { plain.close(); }
+  } finally { server.close(); }
+});
+
+test('serve forwards /api to the site so a run finished on a local page is saved there, and --registry none keeps it home', async (t) => {
+  const built = await fs.stat(path.join(ROOT, 'dist', 'index.html')).catch(() => null);
+  if (!built) return t.skip('dist/ is not built; serve has nothing to serve');
+  const http = await import('node:http');
+  const { spawn } = await import('node:child_process');
+  const seen = [];
+  const registry = http.createServer((req, res) => {
+    let body = '';
+    req.on('data', (c) => { body += c; });
+    req.on('end', () => {
+      seen.push({ method: req.method, url: req.url, auth: req.headers.authorization, body });
+      res.writeHead(req.method === 'PUT' ? 201 : 200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(req.method === 'PUT' ? { id: 'abcdef', eval: 'zzzzzz', replies: 1 } : { ok: true, database: true }));
+    });
+  });
+  await new Promise((resolve) => registry.listen(0, '127.0.0.1', resolve));
+  const site = `http://127.0.0.1:${registry.address().port}`;
+  // Every process and server this test starts is stopped on the way out, whichever assertion failed: a server
+  // left listening keeps the test process alive, and the runner would then wait on it for ever.
+  const children = [];
+  const serve = async (...flags) => {
+    const port = 40000 + Math.floor(Math.random() * 20000);
+    const child = spawn('node', [path.join(ROOT, 'bin/llmscope.js'), 'serve', '--port', String(port), ...flags], { cwd: tmp, env, stdio: ['ignore', 'pipe', 'pipe'] });
+    children.push(child);
+    let out = '';
+    await new Promise((resolve, reject) => {
+      child.stdout.on('data', (c) => { out += c; if (out.includes('registry:')) resolve(); }); // the second line it prints, so both are in hand
+      child.stderr.on('data', (c) => { out += c; });
+      child.on('exit', (code) => reject(new Error(`serve exited ${code}: ${out}`)));
+      setTimeout(() => reject(new Error(`serve did not start in time: ${out}`)), 20000).unref();
+    });
+    return { base: `http://127.0.0.1:${port}`, out: () => out };
+  };
+  try {
+    const forwarding = await serve('--registry', site);
+    assert.ok(forwarding.out().includes(`registry: ${site}`), forwarding.out());
+    const health = await fetch(`${forwarding.base}/api/health`);
+    assert.equal(health.headers.get('content-type'), 'application/json');
+    assert.deepEqual(await health.json(), { ok: true, database: true }, 'the site answered, through the local server');
+    const put = await fetch(`${forwarding.base}/api/runs/abcdef`, { method: 'PUT', headers: { 'content-type': 'application/json', authorization: 'Bearer 0123456789abcdef0123456789abcdef' }, body: JSON.stringify({ id: 'abcdef' }) });
+    assert.equal(put.status, 201);
+    assert.deepEqual(seen[1], { method: 'PUT', url: '/api/runs/abcdef', auth: 'Bearer 0123456789abcdef0123456789abcdef', body: '{"id":"abcdef"}' }, 'the body and the owner token travel, nothing else');
+    const page = await fetch(`${forwarding.base}/zzzzzz`);
+    assert.ok(page.headers.get('content-type').includes('text/html'), 'and the page still answers for an id');
+    await page.arrayBuffer();
+
+    const local = await serve('--registry', 'none');
+    assert.ok(local.out().includes('registry: none'), local.out());
+    const res = await fetch(`${local.base}/api/health`);
+    assert.equal(res.status, 404);
+    assert.match((await res.json()).error, /runs stay in the browser/);
+  } finally {
+    for (const child of children) child.kill();
+    registry.closeAllConnections?.();
+    await new Promise((resolve) => registry.close(resolve));
+  }
 });

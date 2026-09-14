@@ -63,13 +63,14 @@ test('a filtered set of replies narrows the grid to the models and groups it sti
 
 // ---- the claims: what a line says, and when there is one ----
 
-test('a word counts for a wording when it was in at least two of its runs and half of them; a single run is not a claim', () => {
+test('a word counts for a wording from the first response it was in: the rate and the dots say how many', () => {
+  assert.equal(MIN_REPLIES, 1, 'a model that replied with the word once is listed, not called "no matches"');
   assert.ok(counts({ replies: 2, n: 3, rate: 2 / 3 }));
   assert.ok(counts({ replies: 3, n: 3, rate: 1 }));
-  assert.ok(!counts({ replies: 1, n: 3, rate: 1 / 3 }), 'one stray reply');
-  assert.ok(!counts({ replies: 2, n: 6, rate: 1 / 3 }), 'two of six is under half');
-  assert.ok(counts({ replies: 3, n: 6, rate: 0.5 }), 'half counts');
-  assert.ok(!counts({ replies: 1, n: 1, rate: 1 }), `one run of one is ${MIN_REPLIES - 1} short of a claim`);
+  assert.ok(counts({ replies: 1, n: 3, rate: 1 / 3 }), 'one of three counts');
+  assert.ok(counts({ replies: 1, n: 6, rate: 1 / 6 }), 'one of six counts');
+  assert.ok(counts({ replies: 1, n: 1, rate: 1 }));
+  assert.ok(!counts({ replies: 0, n: 3, rate: 0 }), 'none is none');
 });
 
 test('every claim on the card is a cell of the grid: the word, the wording, the model and the count all agree', () => {
@@ -103,9 +104,11 @@ test('wordings with the same outcome share a line, and different outcomes never 
   ];
   const c = keywordClaims({ spec: { ...spec(['word']), runs: 2 }, results }, ['word']);
   const [m] = c.models;
-  assert.equal(m.lines.length, 1, 'z had the word in one run of two, which is no claim, so only x and y have a line — and they share it');
-  assert.deepEqual(m.lines[0].variants, ['x', 'y']);
+  assert.equal(m.lines.length, 2, 'x and y had the word in both runs and share a line; z had it in one of two, a different outcome, so it has its own');
+  assert.deepEqual(m.lines[0].variants, ['x', 'y'], 'the stronger claim first');
   assert.equal(m.lines[0].words[0].replies, 2);
+  assert.deepEqual(m.lines[1].variants, ['z']);
+  assert.equal(m.lines[1].words[0].replies, 1, 'one response of two, counted rather than dropped');
   const split = keywordClaims({ spec: { ...spec(['word', 'other']), runs: 2 }, results: [...two('x', ['a word', 'a word']), ...two('y', ['a word other', 'word other']), ...two('z', ['nothing', 'nothing'])] }, ['word', 'other']);
   assert.equal(split.models[0].lines.length, 2, 'y also counted "other", so its outcome differs from x’s and it gets its own line');
   assert.deepEqual(split.models[0].lines.map((l) => l.variants).sort(), [['x'], ['y']], 'one wording per line');
@@ -122,9 +125,10 @@ test('models are ranked by their strongest claim, and the ones with no claim are
     reply('x', 'word', 0), reply('y', 'word', 1), reply('x', 'nothing', 2, 'm/b'), reply('y', 'nothing', 3, 'm/b'),
   ] }, ['word']);
   assert.deepEqual(c.models.map((m) => m.model), ['m/a', 'm/b']);
-  // One reply per wording is under the two the rule asks for, so even m/a has no claim here…
-  assert.equal(c.withClaims.length, 0);
-  assert.ok(c.models[0].anyHit && !c.models[1].anyHit, '…but it did match, and that ranks it above the model that never did');
+  // One reply per wording, and the word in it: a claim from the first response, so m/a has a line and m/b none.
+  assert.equal(c.withClaims.length, 1);
+  assert.deepEqual(c.withClaims[0].lines[0].variants, ['x', 'y'], 'both wordings, the same outcome, one line');
+  assert.ok(c.models[0].anyHit && !c.models[1].anyHit && !c.models[1].lines.length, 'the model that never matched is listed last, with no line');
 });
 
 test('a claim reads as the sentence the user would write, and the finding is the strongest one', () => {
@@ -142,7 +146,7 @@ test('a claim reads as the sentence the user would write, and the finding is the
   // The finding is the top claim; with none, it says so in the rule's own numbers.
   if (claims.withClaims.length) assert.equal(keywordFinding(claims).headline, claimSentence(claims.withClaims[0], claims.withClaims[0].lines[0]));
   const none = keywordClaims({ spec: spec(['zzzz']), results: [reply('x', 'nothing', 0), reply('y', 'nothing', 1), reply('z', 'nothing', 2)] }, ['zzzz']);
-  assert.equal(keywordFinding(none).headline, `No model ${VERB} any of these words in ${MIN_REPLIES} or more of its responses`);
+  assert.equal(keywordFinding(none).headline, `No model ${VERB} any of these words`);
   // Names come from the catalogue when it is to hand, and read as the model rather than the provider.
   assert.equal(keywordClaims(run, base.keywords, { names: { 'openai/gpt-6-astra': 'OpenAI: GPT-6 Astra' } }).models.find((m) => m.model === 'openai/gpt-6-astra').name, 'GPT-6 Astra');
   assert.equal(claims.models.find((m) => m.model === 'openai/gpt-6-astra').name, prettyName('openai/gpt-6-astra'));
@@ -210,7 +214,7 @@ test('the key draws the things on a line and says what they mean in the run’s 
   assert.ok(chips(svg).includes('“word”'), 'a sample chip');
   assert.match(svg, new RegExp(`a marked word the model ${VERB} for that wording`));
   assert.match(svg, new RegExp(`the responses it appeared in, out of ${run.spec.runs}`));
-  if (claims.models.some((m) => !m.lines.length)) assert.match(svg, new RegExp(`no word in ${MIN_REPLIES} or more of ${run.spec.runs} responses`));
+  if (claims.models.some((m) => !m.lines.length)) assert.match(svg, new RegExp(`no marked word in any of its ${run.spec.runs} responses`));
   assert.ok(!/red:|gray:|a single run/.test(svg), 'nothing describes a colour');
   assert.match(svg, /4 runs per prompt per model · id /, 'the footer keeps where the run came from');
   // Six runs a wording: the key counts to six, and so do the dots under a rate.

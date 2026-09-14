@@ -296,8 +296,8 @@ test('model sets recall the same way: most recently used first, whichever store 
     'run zz',                                // 09-09
     path.join('evals', 'new.json'),          // 09-07
     path.join('evals', 'old.json'),          // 09-02
-    'frontier defaults',                     // untimed, and a different set from recently used
+    'default models',                        // untimed, and a different set from recently used
   ]);
-  assert.equal(bank.filter((e) => e.origin === 'frontier defaults').length, 1);
+  assert.equal(bank.filter((e) => e.origin === 'default models').length, 1);
   assert.deepEqual(await modelBank({}), []);
 });

@@ -65,6 +65,33 @@ function sentenceAround(text, index) {
 }
 
 /**
+ * The first refusal the rules find in `text`, as the run of characters they matched — or none. Meant for the
+ * evidence sentence a verdict carries, so a page can mark the phrase that made a reply a refusal the way the
+ * sheet marks a keyword. The text is read as given, not normalized, so the offsets are into the string passed
+ * in; the evidence is written in the normalized form already, and a sentence that is not simply goes unmarked.
+ * @returns {Array<{start:number, end:number}>} at most one span
+ */
+export function refusalSpans(text) {
+  const src = String(text || '');
+  for (const re of SCAN) {
+    for (const m of src.matchAll(re)) {
+      if (SOFTENERS.test(clauseFrom(src, m))) continue;
+      return [{ start: m.index, end: m.index + m[0].length }];
+    }
+  }
+  return [];
+}
+
+/** Each way a reply comes to count as a refusal, in the words a list of refusals says it with. */
+export const REFUSAL_REASONS = {
+  pattern: 'declined in its own words',
+  empty_response: 'nothing came back',
+  content_filter: 'stopped by the provider’s content filter',
+  blocked_by_provider: 'blocked by the provider',
+  api_refusal_field: 'the API reported a refusal',
+};
+
+/**
  * @param {{text?:string, error?:string|null, blocked?:boolean, finish_reason?:string|null, api_refusal?:string|null}} response
  * @returns {{refused:boolean, reason:string|null, evidence:string|null}}
  */

@@ -23,6 +23,9 @@ export default defineConfig({
   outDir: './dist',
   build: { assets: '_assets' },
   vite: {
+    // `npm run dev` has no API of its own: /api goes to `npm run api` (wrangler dev, port 8787), so the page
+    // talks to the same origin here as it does when the Worker serves the built site.
+    server: { proxy: { '/api': 'http://localhost:8787' } },
     resolve: {
       // Two specifiers the engine reaches for only when it is running under Node. Each is behind a
       // `typeof document === 'undefined'` test or a try/catch, so the browser never evaluates them — but Vite

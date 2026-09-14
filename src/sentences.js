@@ -15,6 +15,7 @@
 // Nothing here scores anything. A sentence is selected by the same matcher the run scored with, so the page
 // shows exactly the text behind the numbers, but which sentences are read changes no rate and no verdict.
 import { findKeywordSpans } from './checks/keywords.js';
+import { refusalSpans, REFUSAL_REASONS } from './checks/refusal.js';
 
 /**
  * A reply split into sentences. Every line is a break — a bulleted or numbered reply has no full stops to go on —
@@ -153,6 +154,69 @@ export function sentenceBatches(responses = [], terms = [], { by = 'group', text
     matches: drawn.reduce((n, b) => n + b.matches, 0),
     sentences: drawn.reduce((n, b) => n + b.lines.length, 0),
     replies: new Set(lines.map((l) => l.response)).size,
+    lines,
+  };
+}
+
+// ---------- refusals, as sentences ----------
+// A refusal verdict carries its evidence: the sentence the rule matched, in the normalized form it matched in.
+// Listed under the wording that drew it, those sentences are what "3 of 5 refused" looks like — which phrase each
+// model declined with, and whether the same wording drew the same phrase from everyone or a different one from
+// each. A refusal with no sentence behind it (nothing came back, the provider's filter stopped it) is listed too,
+// with the reason in words, because it counts the same on the card and a list that dropped it would disagree
+// with the number over it.
+
+/**
+ * Every refused reply as a line, in the order the replies are given.
+ * @param {object[]} responses replies in reading order (card order, from selectResponses)
+ * @returns {Array<{response: object, text: string, reason: string, pattern: boolean, spans: Array<{start:number, end:number}>}>}
+ *   text: the sentence the rule matched — or what the provider said, or '' when there is nothing; reason: why it
+ *   counts, in words; pattern: whether the model declined in its own words; spans: the phrase that matched, as
+ *   offsets into text, so it can be marked
+ */
+export function refusalLines(responses = []) {
+  const lines = [];
+  for (const response of responses) {
+    if (!response.refused) continue;
+    const text = String(response.refusal_evidence || '').trim();
+    const pattern = !response.refusal_reason || response.refusal_reason === 'pattern';
+    const reason = pattern ? REFUSAL_REASONS.pattern : REFUSAL_REASONS[response.refusal_reason] || String(response.refusal_reason).replace(/_/g, ' ');
+    lines.push({ response, text, reason, pattern, spans: pattern && text ? refusalSpans(text) : [] });
+  }
+  return lines;
+}
+
+/**
+ * The refusals gathered into batches: one per wording, or one per model, the way `sentenceBatches` gathers
+ * marked sentences. Every group and every model that was asked keeps its batch even when nothing in it was
+ * refused — a wording nobody declined is the other half of the comparison, and the batch says so with its
+ * counts. Batches keep the order the responses arrived in, which is the card's.
+ * @param {object} [opts]
+ * @param {'group'|'model'} [opts.by]
+ * @returns {{batches: Array<{key: string, label: string, lines: object[], refused: number, replies: number, models: string[], refusers: string[]}>, refused: number, replies: number, lines: object[]}}
+ *   models: every model asked in the batch; refusers: the ones that declined
+ */
+export function refusalBatches(responses = [], { by = 'group' } = {}) {
+  const lines = refusalLines(responses);
+  const { key, label } = KEYED[by] || KEYED.group;
+  const batches = new Map();
+  for (const r of responses) {
+    const k = key({ response: r });
+    if (!batches.has(k)) batches.set(k, { key: k, label: label({ response: r }), lines: [], refused: 0, replies: 0, models: new Set(), refusers: new Set() });
+    const batch = batches.get(k);
+    batch.replies += 1;
+    batch.models.add(r.model);
+  }
+  for (const line of lines) {
+    const batch = batches.get(key(line));
+    batch.lines.push(line);
+    batch.refused += 1;
+    batch.refusers.add(line.response.model);
+  }
+  return {
+    batches: [...batches.values()].map((b) => ({ ...b, models: [...b.models], refusers: [...b.refusers] })),
+    refused: lines.length,
+    replies: responses.length,
     lines,
   };
 }

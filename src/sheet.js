@@ -18,7 +18,8 @@
 import { prepareRichInline, walkRichInlineLineRanges, materializeRichInlineLineRange } from '@chenglou/pretext/rich-inline';
 import { COLORS, analyze, brandLine, keywordPhrase, outcomeOf } from './analyze.js';
 import { findKeywordSpans, stripPattern } from './checks/keywords.js';
-import { sentences, sentenceBatches, SENTENCE_SORTS } from './sentences.js';
+import { sentences, sentenceBatches, refusalBatches, SENTENCE_SORTS } from './sentences.js';
+import { refusalSpans } from './checks/refusal.js';
 import { esc, wrap, fitTitleBlock, readableLines, shortModel, GROW_MAX, titleLine } from './render.js';
 import { logoBody, providerOf } from './logos.js';
 import { modelColors, contrast } from './palette.js';
@@ -284,7 +285,7 @@ function link(href, body, title = null, external = false) {
 
 /**
  * The eval's URL as something clickable, or null when there is nothing to click: a run whose share base is empty
- * shows its bare id, and an id is not an address. A base with no scheme (the default `llmscope.dev/e/`) is https.
+ * shows its bare id, and an id is not an address. A base with no scheme (the default `llmscope.dev/`) is https.
  */
 export function linkUrl(url) {
   const s = String(url || '').trim();
@@ -449,7 +450,7 @@ export function sheetNoteParts(terms = [], mode = 'full') {
   const parts = [];
   if (terms.length) parts.push(`${MARK_WORD} = ${keywordPhrase({ keywords: terms, keyword_mode: 'any' })}`);
   // Last is never dropped: a reader must always be told whether these are whole replies.
-  parts.push(mode === 'full' ? CUT_NOTE : `showing ${EXCERPTS[mode]} · … = the rest`);
+  parts.push(mode === 'full' ? CUT_NOTE : `showing ${EXCERPTS[mode]} · … = the rest${mode === 'matches' ? ` · ${NO_MATCHES} = a model none of whose replies matched` : ''}`);
   return parts;
 }
 export function sheetNote(terms = [], mode = 'full') {
@@ -662,19 +663,21 @@ function itemBag(f) {
  * With an `icon`, the first item also carries that badge in the space reserved for it.
  */
 /** What a marked run is drawn with, under one style: the block behind it, how solid it is, a rule, and its ink. */
-function markOf(style, color, fill) {
-  if (style === 'wash') return { mark: MARK_WASH, markOpacity: 1, rule: null, ink: fill, bold: false };
-  if (style === 'underline') return { mark: null, markOpacity: 1, rule: MARK_BG, ink: fill, bold: false };
-  if (style === 'wash-rule') return { mark: MARK_WASH, markOpacity: 1, rule: MARK_BG, ink: fill, bold: false };
+/** How a match is drawn in `style`: `color` is the model's, `base` the marker's own — amber for a keyword, red for a refusal. */
+function markOf(style, color, fill, base = MARK_BG) {
+  const wash = base === MARK_BG ? MARK_WASH : mix(base, COLORS.bg, WASH_AMOUNT);
+  if (style === 'wash') return { mark: wash, markOpacity: 1, rule: null, ink: fill, bold: false };
+  if (style === 'underline') return { mark: null, markOpacity: 1, rule: base, ink: fill, bold: false };
+  if (style === 'wash-rule') return { mark: wash, markOpacity: 1, rule: base, ink: fill, bold: false };
   if (style === 'model') return { mark: color, markOpacity: 1, rule: null, ink: inkOn(color), bold: false };
   if (style === 'tint') return { mark: mix(color, COLORS.bg, TINT_OPACITY), markOpacity: 1, rule: null, ink: fill, bold: false };
   if (style === 'rule') return { mark: null, markOpacity: 1, rule: color, ink: fill, bold: false };
-  if (style === 'invert') return { mark: null, markOpacity: 1, rule: null, ink: MARK_BG, bold: true };
-  return { mark: MARK_BG, markOpacity: 1, rule: null, ink: MARK_TEXT, bold: false };
+  if (style === 'invert') return { mark: null, markOpacity: 1, rule: null, ink: base, bold: true };
+  return { mark: base, markOpacity: 1, rule: null, ink: base === MARK_BG ? MARK_TEXT : inkOn(base), bold: false };
 }
 
-function pushMarked(bag, text, spans, fill, f, { model = null, icon = null, nbspWidth = 0, style = 'block', color = fill } = {}) {
-  const m = markOf(style, color, fill);
+function pushMarked(bag, text, spans, fill, f, { model = null, icon = null, nbspWidth = 0, style = 'block', color = fill, markColor = MARK_BG } = {}) {
+  const m = markOf(style, color, fill, markColor);
   const cuts = replyCuts(text, spans);
   for (let j = 0; j < cuts.length - 1; j++) {
     const [from, to] = [cuts[j], cuts[j + 1]];
@@ -723,7 +726,13 @@ function paragraphs(responses, analysis, colors, f, terms = [], mode = 'full', s
       // The heading keeps the first lines of the first reply with it, so it never ends a column on its own.
       out.push(head.paragraph(key, { model: byGroup ? null : key, group: byGroup ? key : null, keep: 2 }));
     }
-    rs.forEach((r, i) => {
+    // Under "only matching sentences" the page lists the replies that have one. A reply with none would stand
+    // as a bare ellipsis, and a page of ellipses says nothing a reader can use; so those replies are left out,
+    // and the models with no match in the batch are named once each at its foot, muted — the page still says
+    // who did not, and the text that did match gets the room.
+    const only = mode === 'matches';
+    const listed = only ? rs.filter((r) => (r.error && !r.refused) || findKeywordSpans(collapseEmoji(r.text || ''), terms).length) : rs;
+    listed.forEach((r, i) => {
       const color = colors[r.model];
       const bag = itemBag(f);
       // A no-break space holds the mark's width, so the mark, the name and the first word wrap as one.
@@ -736,9 +745,25 @@ function paragraphs(responses, analysis, colors, f, terms = [], mode = 'full', s
       // the first sits closest to the heading it belongs to.
       out.push(bag.paragraph(`${key}:${i}`, { model: byGroup ? null : key, group: byGroup ? key : null, indent: headed ? indent : 0, gapScale: headed ? (i ? 0.4 : 0.25) : 0.6 }));
     });
+    if (only) {
+      // One row per model with no matching reply here: under a wording, each such model by name; under a model,
+      // the one line that says so. Muted, so the rows that matched keep the eye.
+      const quiet = byGroup
+        ? [...new Set(rs.map((r) => r.model))].filter((m) => !listed.some((r) => r.model === m))
+        : (listed.length ? [] : [key]);
+      quiet.forEach((m, j) => {
+        const bag = itemBag(f);
+        if (byGroup) bag.push(NBSP + shortModel(m) + ' ', COLORS.muted, { bold: true, logo: m, model: m, extraWidth: iconAdvance(f) - nbspWidth });
+        bag.push(NO_MATCHES, COLORS.muted);
+        out.push(bag.paragraph(`${key}:none:${j}`, { model: byGroup ? null : key, group: byGroup ? key : null, indent: headed ? indent : 0, gapScale: headed ? (listed.length || j ? 0.4 : 0.25) : 0.6 }));
+      });
+    }
   }
   return out;
 }
+
+/** What a model with no matching reply is listed as, under "only matching sentences". */
+export const NO_MATCHES = 'no matches';
 
 /** Every line of a set of paragraphs at one column width, in reading order: the measured (expensive) step. */
 function lineRanges(paras, colW) {
@@ -969,8 +994,13 @@ const runsOn = (prev, line) => Boolean(prev) && prev.response === line.response 
  * that word is marked: the page is then read one word at a time, and a second colour of evidence in the same
  * line is a question the reader did not ask.
  */
-function sentenceParagraphs(batches, analysis, colors, f, terms, by = 'group', style = 'block', heading = HEADING_SCALE, name = NAME_SCALE, promptSize = Infinity, { layout = 'flow', voice = 'model', clean = false } = {}) {
+function sentenceParagraphs(batches, analysis, colors, f, terms, by = 'group', style = 'block', heading = HEADING_SCALE, name = NAME_SCALE, promptSize = Infinity, { layout = 'flow', voice = 'model', clean = false, spansOf = null, countOf = null, perRun = null, markColor = MARK_BG } = {}) {
   const labelled = analysis.variants.length > 1 || analysis.variants[0]?.label !== '—';
+  // What is marked and what is counted are the keyword page's unless the caller brings its own: the refusals
+  // page marks the refusing phrase and counts refused replies, on the same page otherwise.
+  const findSpans = spansOf || ((text, batch) => findKeywordSpans(text, by === 'keyword' ? [batch.key] : terms));
+  const count = countOf || ((batch) => sentenceCount(batch, by, terms));
+  const runTally = perRun || ((items) => items.reduce((n, it) => n + it.spans.length, 0));
   const nbspWidth = measureWidth(NBSP, font(f));
   const rows = layout === 'rows' || layout === 'stack';
   const indent = rows ? f * 1.1 : 0;
@@ -1003,9 +1033,9 @@ function sentenceParagraphs(batches, analysis, colors, f, terms, by = 'group', s
       // The heading keeps its count line and the first lines of the first model with it.
       out.push(bag.paragraph(batch.key, { ...anchors, keep: 4 }));
       const meta = itemBag(f);
-      meta.push(sentenceCount(batch, by, terms), COLORS.muted, { size: metaSize });
+      meta.push(count(batch), COLORS.muted, { size: metaSize });
       out.push(meta.paragraph(`${batch.key}:count`, { gapScale: 0.12 }));
-    } else bag.push(' ' + sentenceCount(batch, by, terms), COLORS.muted);
+    } else bag.push(' ' + count(batch), COLORS.muted);
     let lastGroup = null;
     sentenceRuns(batch.lines, by).forEach((run, ri) => {
       const first = run.lines[0].response;
@@ -1017,7 +1047,7 @@ function sentenceParagraphs(batches, analysis, colors, f, terms, by = 'group', s
       // Measured once per run: fitPage walks this at every candidate text size, so the spans are not re-found.
       const items = run.lines.map((line) => {
         const text = clean ? stripMarkup(line.text) : line.text.replace(/\s+/g, ' ').trim();
-        return { line, text, spans: findKeywordSpans(text, by === 'keyword' ? [batch.key] : terms) };
+        return { line, text, spans: findSpans(text, batch) };
       });
       const ns = Math.max(f, Math.round(Math.min(f * name, hs * NAME_OF_HEADING) * 10) / 10);
       // Rows give each model a paragraph of its own, set in under the wording, so a batch is read as a list of
@@ -1031,7 +1061,7 @@ function sentenceParagraphs(batches, analysis, colors, f, terms, by = 'group', s
       }
       if (by !== 'model') nameBag.push(NBSP + shortModel(first.model), color, { bold: true, size: ns, logo: first.model, model: first.model, extraWidth: iconAdvance(ns) - measureWidth(NBSP, font(ns)) });
       // Every run says how many of the batch's matches are its own, so "which model" is read rather than counted.
-      nameBag.push(` ×${items.reduce((n, it) => n + it.spans.length, 0)}`, COLORS.muted, rows ? { size: metaSize } : {});
+      nameBag.push(` ×${runTally(items)}`, COLORS.muted, rows ? { size: metaSize } : {});
       // Stacked, the name is its own line and the sentences start under it; otherwise they run on from it.
       const textBag = layout === 'stack' ? itemBag(f) : nameBag;
       const runGap = ri ? 0.4 : 0.25;
@@ -1040,7 +1070,7 @@ function sentenceParagraphs(batches, analysis, colors, f, terms, by = 'group', s
       for (const { line, text, spans } of items) {
         const gap = prev && !runsOn(prev, line);
         textBag.push(gap ? ' … ' : ' ', gap ? COLORS.muted : ink);
-        pushMarked(textBag, text, spans, ink, f, { model: first.model, style, color });
+        pushMarked(textBag, text, spans, ink, f, { model: first.model, style, color, markColor });
         prev = line;
       }
       if (rows) out.push(textBag.paragraph(`${batch.key}:run${ri}`, { indent, gapScale: layout === 'stack' ? 0.08 : runGap }));
@@ -1179,7 +1209,94 @@ export function renderSentenceSheet(run, { size = 4096, maxFont = null, minFont 
   return { svg, font: best.f, columns: best.g.columns, matches: found.matches, sentences: found.sentences, words, sort: by, mark: markStyle, layout, voice, clean, batches, missing: found.missing, replies: found.replies, exact: textReady(), fill: columnFill(best.placed, best.g), highlight: terms };
 }
 
-function renderSvg({ f, g, placed }, { a, size, select, responses, run, shareUrl, colors, head, leg, sort = 'group', kind = 'responses', metaParts = null, logos = sort !== 'model', markStyle = 'block' }) {
+// ---------- the refusals page ----------
+/** The colour a refusal is marked in: the same red the badge before a refused reply carries. */
+export const REFUSAL_MARK = BADGES.refused.color;
+
+/** The count under a batch heading on the refusals page: how many replies declined, and from how many models. */
+export function refusalCount(batch, by = 'group') {
+  if (!batch.refused) return by === 'model' ? 'refused none of its replies' : 'no model refused this wording';
+  const head = `${batch.refused} of ${batch.replies} repl${batch.replies === 1 ? 'y' : 'ies'} refused`;
+  const n = batch.refusers?.length ?? 0;
+  return by === 'model' || !n ? head : `${head} · ${n} model${n === 1 ? '' : 's'}`;
+}
+
+/** The note along the bottom of the refusals page: what the mark is, what ×n counts, and how the page is batched. */
+export function refusalNoteParts(by = 'group') {
+  return [
+    `${MARK_WORD} = the phrase that made it a refusal`,
+    `×n = that ${by === 'model' ? 'wording' : 'model'}'s refusals`,
+    '… = another reply',
+    `every refused reply, cut to the sentence it declined in · ${SENTENCE_SORTS[by === 'model' ? 'model' : 'group']}`,
+  ];
+}
+export const refusalNote = (by = 'group') => refusalNoteParts(by).join(' · ');
+
+/**
+ * Every refused reply, cut to the sentence it declined in, on one square image batched by the variable the eval
+ * swapped — the sentences page, drawn for refusals.
+ *
+ * The card says three of five refused. This is what that looked like: under each wording, every model that
+ * declined it and the sentence it declined in, with the phrase the rules matched marked in red, so a reader sees
+ * how a refusal happens — "I can't help with", "I won't generate" — and whether the same wording drew the same
+ * phrase from everyone or a different one from each. A wording nobody declined keeps its heading and says so:
+ * that is the other half of the comparison. A refusal with no sentence behind it (nothing came back, the
+ * provider's filter stopped it) is listed with the reason in words, because the card counted it.
+ *
+ * Nothing here scores: the refusals are the run's own verdicts, and the phrase is found again in the evidence
+ * each verdict already carries.
+ *
+ * @param {object} opts the sentences page's, minus the words: sort (group | model), mark, layout, voice, clean,
+ *   select, size, maxFont, columns, url
+ * @returns {{svg:string, font:number, columns:number, refused:number, replies:number, sort:string, batches:Array<{key:string, label:string, refused:number, replies:number, models:string[]}>, exact:boolean, fill:number}}
+ */
+export function renderRefusalSheet(run, { size = 4096, maxFont = null, minFont = 6, columns = null, select = 'all', url = null, sort: order = 'group', mark: markOption = SENTENCE_DEFAULTS.mark, heading = HEADING_SCALE, name = NAME_SCALE, layout: layoutOption = SENTENCE_DEFAULTS.layout, voice: voiceOption = SENTENCE_DEFAULTS.voice, clean = SENTENCE_DEFAULTS.clean } = {}) {
+  const by = order === 'model' ? 'model' : 'group';
+  const markStyle = MARK_STYLES[markOption] ? markOption : SENTENCE_DEFAULTS.mark;
+  const layout = SENTENCE_LAYOUTS[layoutOption] ? layoutOption : SENTENCE_DEFAULTS.layout;
+  const voice = SENTENCE_VOICES[voiceOption] ? voiceOption : SENTENCE_DEFAULTS.voice;
+  const { analysis: a, responses } = selectResponses(run, select, by);
+  const colors = modelColors(a.rows.map((r) => r.model));
+  const shareUrl = url || `${a.spec.share_base || ''}${a.id}`;
+  const found = refusalBatches(responses, { by });
+  // A refusal with no sentence is listed by its reason; one the provider explained carries the reason and the explanation.
+  const batches = found.batches.map((b) => ({
+    ...b,
+    lines: b.lines.map((l) => ({ ...l, text: collapseEmoji(l.pattern ? l.text : `(${l.reason})${l.text ? ` ${l.text}` : ''}`) })),
+  }));
+  const leg = legend(a, size, colors, shareUrl, refusalNoteParts(by), { outcomes: false });
+  const paragraphOpts = { layout, voice, clean, spansOf: (text) => refusalSpans(text), countOf: (b) => refusalCount(b, by), perRun: (items) => items.length, markColor: REFUSAL_MARK };
+  const fitWith = (h, cap) => fitPage(
+    (f, colW) => lineRanges(sentenceParagraphs(batches, a, colors, f, [], by, markStyle, heading, name, h.block.size, paragraphOpts), colW),
+    { size, headerH: h.headerH, legendH: leg.height, columns, minFont, maxFont: cap },
+  );
+  const gapLines = layout === 'flow' ? 0 : 1;
+  let head = header(a, size, { gapLines });
+  let cap = maxFont || null;
+  if (heading > 1 || name > 1) {
+    const want = fitWith(head, cap).f / BODY_OF_PROMPT;
+    for (let extra = 1; extra <= 4 && head.block.size < want; extra++) {
+      const grown = header(a, size, { extraLines: extra, gapLines });
+      if (grown.block.size <= head.block.size) break;
+      head = grown;
+    }
+    cap = Math.min(cap || Infinity, head.block.size * BODY_OF_PROMPT);
+  }
+  const best = fitWith(head, cap);
+  const refusers = new Set(found.lines.map((l) => l.response.model)).size;
+  const metaParts = [
+    `${found.refused} refusal${found.refused === 1 ? '' : 's'} in ${responses.length} repl${responses.length === 1 ? 'y' : 'ies'}`,
+    `${refusers} of ${a.rows.length} model${a.rows.length === 1 ? '' : 's'} refused`,
+  ];
+  const svg = pinTextWidths(renderSvg(best, { a, size, select, responses: responses.length, run, shareUrl, colors, head, leg, sort: by, kind: 'refusals', metaParts, logos: true, markStyle, markColor: REFUSAL_MARK }));
+  return {
+    svg, font: best.f, columns: best.g.columns, refused: found.refused, replies: found.replies, sort: by, mark: markStyle, layout, voice, clean,
+    batches: found.batches.map((b) => ({ key: b.key, label: b.label, refused: b.refused, replies: b.replies, models: b.refusers })),
+    exact: textReady(), fill: columnFill(best.placed, best.g),
+  };
+}
+
+function renderSvg({ f, g, placed }, { a, size, select, responses, run, shareUrl, colors, head, leg, sort = 'group', kind = 'responses', metaParts = null, logos = sort !== 'model', markStyle = 'block', markColor = MARK_BG }) {
   const p = [];
   p.push(`<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">`);
   const ids = sheetIds(a);
@@ -1296,7 +1413,7 @@ function renderSvg({ f, g, placed }, { a, size, select, responses, run, shareUrl
     // The cue is drawn the way the body draws a match — block, wash, rule or ink — or it keys something the page
     // does not do. A style that marks in each model's own colour has no single colour to show, so the cue stands
     // in with the amber the rest of the project means "keyword" with.
-    const m = markOf(markStyle, MARK_BG, COLORS.muted);
+    const m = markOf(markStyle, markColor, COLORS.muted, markColor);
     const cueFont = font(noteSize, { bold: m.bold });
     const cueW = measureWidth(MARK_WORD, cueFont);
     if (m.mark) p.push(markRect(wordX, urlBaseline, noteSize, cueW, m.mark, m.markOpacity, markPad));

@@ -6,7 +6,7 @@
 import { planRun, runEval, rescoreRun } from '../src/engine.js';
 import { totalTokens, outcomeOf, replyBody } from '../src/analyze.js';
 import { EXCERPTS } from '../src/sheet.js';
-import { IMAGES, imageOf, sheetKind, drawImage, markedWords } from '../src/images.js';
+import { IMAGES, tabsFor, measureTab, tabOf, imageOf, sheetKind, drawImage, markedWords } from '../src/images.js';
 import { RESPONSE_FILTERS, filterResponses, parseSearch, shownText, markSpans, toCsv, toJson } from '../src/responses.js';
 import { isValidKeyword, splitTerms, mergeTerms, countKeywords, cleanTerms, batchKey } from '../src/checks/keywords.js';
 import { logoBody, providerOf } from '../src/logos.js';
@@ -30,8 +30,8 @@ let paintedId = null; // which run the marked words below belong to
 // Every image drawn for the run on show, by kind, with the options it was drawn under: a 4096px sheet is the
 // expensive part of switching tabs, so each is kept until the run, the words or its own options change.
 const drawn = new Map();
-let view = 'card'; // the image on show: a kind from IMAGES
 let abort = null;
+let runGen = 0; // bumped by New eval, so a run stopped by it does not paint itself back when it winds down
 let modelList = [];
 // What the connected key can still spend, read when the app opens and again after every run. null until read.
 let balance = null;
@@ -72,11 +72,29 @@ let keywordView = store.getPref('keyword_view', 'prompt');
 // resolved screen can wait for the fonts without waiting for the rest of boot, which may be waiting on it.
 const textReady = ensureText();
 
+// What the form says before anyone has typed: read from the markup once, before boot writes anything to it,
+// so New eval can put it back — everything but the models, which are the one thing worth carrying over. The
+// values under the default prompt's slot are the one thing the markup cannot carry, since the slots are derived.
+const DEFAULT_VALUES = { organization: 'Scientology, your local HOA', group: 'Black, white, Muslim, Jewish,' };
+const DEFAULT_FORM = {
+  prompts: $('prompts').value.split(/\r?\n/).map((s) => s.trim()).filter(Boolean),
+  primary: document.querySelector('input[name=primary]:checked').value,
+  keywords: [], keyword_mode: $('keyword_mode').value, runs: Number($('runs').value) || 1,
+};
+
 // ---------- stages ----------
 function setStage(name) {
   document.documentElement.dataset.stage = name;
   window.scrollTo(0, 0);
   if (name === 'key') $('apikey').focus({ preventScroll: true });
+}
+
+// ---------- the address bar ----------
+// The page keeps its address honest: /<id> while a run is on show — the same address its card prints, so the
+// bar can be copied as a link — and /new on an empty form. Replaced rather than pushed, so Back still leaves.
+const EVAL_PATH = /^\/(?:e\/)?[A-Za-z0-9]{6}$/; // /<id>, and the /e/<id> earlier cards printed
+function syncAddress(path) {
+  try { if (location.pathname !== path || location.hash) history.replaceState(null, '', path); } catch { /* an origin that refuses: the bar is a nicety */ }
 }
 
 // ---------- opening an eval by id ----------
@@ -90,16 +108,16 @@ function parseEvalRef(input) {
   if (!text) return null;
   const hash = text.match(/[#&]spec=([A-Za-z0-9\-_]+)/);
   if (hash) { try { return { kind: 'spec', spec: b64.dec(hash[1]) }; } catch { return null; } }
-  // llmscope.dev/e/D5a3G9, with or without a scheme, and the bare id itself.
+  // llmscope.dev/D5a3G9 or llmscope.dev/e/D5a3G9, with or without a scheme, and the bare id itself.
   const tail = text.replace(/[?#].*$/, '').split('/').filter(Boolean).pop() || '';
   return isValidId(tail) ? { kind: 'id', id: tail } : null;
 }
 
 /**
- * Turn a reference into something to look at. Three places are asked in turn: this browser's own runs, the
- * evals/ directory of whatever origin is serving this page, and the spec carried in a share link. A bare id
- * from a stranger's post resolves only once a registry exists to answer for it, which is what Supabase is for;
- * until then the error says so rather than pretending the id was malformed.
+ * Turn a reference into something to look at. The places asked, in turn: this browser's own runs, the site's
+ * registry (the runs and evals saved to its API), what the build ships as plain files, and the spec carried in a
+ * share link. A bare id from a stranger's post resolves through the registry; on an origin without one —
+ * `llmscope serve` — the error says so rather than pretending the id was malformed.
  */
 async function resolveEvalRef(ref) {
   if (!ref) return { error: 'That is not an eval ID or an llmscope link. An ID is six characters, like D5a3G9.' };
@@ -114,16 +132,24 @@ async function resolveEvalRef(ref) {
   }
   // A run's own id first, then an eval's — the newest run this browser has of it — then what the site publishes.
   const run = (await store.loadRun(ref.id)) || (await store.latestRunFor(ref.id));
-  if (run) return { id: run.id, spec: normalizeSpec(run.spec), run };
+  if (run) { rescoreRun(run); return { id: run.id, spec: normalizeSpec(run.spec), run }; }
   return (await lookupPublished(ref.id))
-    || { error: `Nothing here answers to ${ref.id}. This browser can open its own runs and the evals published on this site; an ID from somebody else's post needs the full share link for now.` };
+    || { error: `Nothing answers to ${ref.id}: not this browser, and not this site. A run that was never saved to the site opens only from its share link or its results file.` };
 }
 
 /**
- * What this origin has published under an id. A finished run is asked for first because it answers with its
- * card as well as its spec; a bare spec is the fallback. Null when the origin publishes neither.
+ * What is published under an eval's id. The site's registry is asked first — the newest run saved of the eval
+ * answers with its card as well as its spec; the spec alone is the fallback — and then what the build ships as
+ * plain files, which is all `llmscope serve` and a static host have: the bundled evals, and any run under /out/.
+ * Null when nothing anywhere answers to the id.
  */
 async function lookupPublished(id) {
+  const published = await store.publishedEval(id);
+  if (published) {
+    const newest = published.runs?.[0] ? await store.loadRun(published.runs[0].id) : null;
+    if (newest) { rescoreRun(newest); return { id: newest.id, spec: normalizeSpec(newest.spec), run: newest }; }
+    return { id, spec: normalizeSpec(published.spec) };
+  }
   for (const [path, take] of [
     [`/out/${id}.results.json`, (j) => (Array.isArray(j.results) ? { id, spec: normalizeSpec(j.spec), run: j } : null)],
     [`/evals/${id}.json`, (j) => ({ id, spec: normalizeSpec(j) })],
@@ -138,17 +164,28 @@ async function lookupPublished(id) {
   return null;
 }
 
-/** Show the eval, whatever it came from, before a single request is sent. */
-async function openEvalRef(ref, errorBox) {
-  const found = await resolveEvalRef(ref);
+/** Whether this browser did the run itself: then it needs no look before running, and opens where it was made. */
+const isOwnRun = async (id) => (await store.listRuns()).some((e) => e.id === id);
+
+/** Show what a reference resolved to: an error where it was typed, your own run in the app, anything else on the resolved screen. */
+async function openFound(found, errorBox) {
   if (found.error) {
     if (errorBox) { errorBox.hidden = false; errorBox.textContent = found.error; }
     return false;
   }
   if (errorBox) errorBox.hidden = true;
+  if (found.run && (await isOwnRun(found.run.id))) {
+    openedFrom = null; // reopening your own run is not a fork of somebody's published one
+    setStage('app');
+    await openRun(found.run, `reopened ${found.run.id} · ${found.run.results.length} responses · ${found.run.provider}`);
+    return true;
+  }
   await showResolved(found);
   return true;
 }
+
+/** Show the eval, whatever it came from, before a single request is sent. */
+const openEvalRef = async (ref, errorBox) => openFound(await resolveEvalRef(ref), errorBox);
 
 // The header's Open… menu. Focus lands in the id box when it opens; it closes once something has been opened,
 // on Escape, or on a click anywhere else, so it never has to be put away by hand.
@@ -175,6 +212,7 @@ for (const el of document.querySelectorAll('[data-go]')) {
     const to = el.dataset.go;
     if (el.tagName === 'A') e.preventDefault();
     if (to === 'demo') { setStage('app'); ready.then(() => start('mock')); return; }
+    if (to === 'new') { ready.then(startNew); return; }
     // "Start evaluating" asks for a key only when there is none. A reader who came back to the landing page
     // from the app already has theirs, in the box or in storage; the key page is reached again through
     // "Change key", which goes there by name rather than through this.
@@ -358,7 +396,7 @@ function renderVariables() {
   if (!names.length) { box.innerHTML = `${stray}<div class="hint">No {slots} in the prompt yet. Without one you get a single-column eval, which is fine for constraint tests.</div>`; return; }
   box.innerHTML = stray + names.map((name) => {
     const inline = lifted.variables[name];
-    const val = inline ? inline.join(', ') : (varValues[name] ?? (name === 'group' ? 'Black, white, Muslim, Jewish,' : ''));
+    const val = inline ? inline.join(', ') : (varValues[name] ?? (DEFAULT_VALUES[name] || ''));
     return `<div class="var"><code>{${esc(name)}}</code><input data-var="${esc(name)}" value="${esc(val)}" placeholder="value, value, value" ${inline ? 'readonly title="inline group from the prompt"' : ''}></div>`;
   }).join('');
   box.querySelectorAll('input[data-var]').forEach((el) => el.addEventListener('input', () => { varValues[el.dataset.var] = el.value; refresh(); }));
@@ -430,7 +468,7 @@ function renderModels() {
   const pool = modelList.filter(isRunnableModel);
   let groups;
   if (!modelList.length) {
-    groups = [{ name: 'Frontier defaults (model list unavailable)', models: FRONTIER_DEFAULTS.map((id) => ({ id, name: id, pricing: null })) }];
+    groups = [{ name: 'Default models (model list unavailable)', models: FRONTIER_DEFAULTS.map((id) => ({ id, name: id, pricing: null })) }];
   } else if (filter) {
     // A search reaches the whole catalogue, every tier of it: that is how you get from one Gemini to all of them.
     groups = groupByProvider(pool.filter((m) => m.id.toLowerCase().includes(filter) || (m.name || '').toLowerCase().includes(filter)));
@@ -447,7 +485,7 @@ function renderModels() {
     if (!g.models.length) continue;
     html += `<div class="prov">${esc(g.name)}</div>`;
     for (const m of g.models) {
-      html += `<label class="m" title="${esc(m.id)}"><input type="checkbox" data-model="${esc(m.id)}" ${checked.has(m.id) ? 'checked' : ''}><span>${esc(m.id)}${frontier.includes(m.id) ? '<span class="star" title="frontier default">★</span>' : ''}</span><span class="price">${esc(m.pricing ? priceLabel(m).replace(' per M tokens', '') : '')}</span></label>`;
+      html += `<label class="m" title="${esc(m.id)}"><input type="checkbox" data-model="${esc(m.id)}" ${checked.has(m.id) ? 'checked' : ''}><span>${esc(m.id)}${frontier.includes(m.id) ? '<span class="star" title="default model">★</span>' : ''}</span><span class="price">${esc(m.pricing ? priceLabel(m).replace(' per M tokens', '') : '')}</span></label>`;
     }
   }
   box.innerHTML = html || '<div class="hint none">no models match</div>';
@@ -470,7 +508,7 @@ function renderModelStatus() {
   btn.textContent = allChecked ? `Clear these ${visibleModels.length}` : `Select all ${visibleModels.length}`;
   $('model-status').textContent = filter
     ? `${visibleModels.length} of ${modelList.length} match “${filter}” · ${checked.size} selected`
-    : `${modelList.length} models · ${checked.size} selected · ★ frontier default`;
+    : `${modelList.length} models · ${checked.size} selected · ★ default model`;
 }
 
 async function loadModels() {
@@ -562,7 +600,7 @@ async function refresh() {
   const spec = readSpec();
   const plan = await planRun(spec);
   planId = plan.id;
-  shareLink = `${location.origin}${location.pathname}#spec=${b64.enc(spec)}`;
+  shareLink = `${location.origin}/#spec=${b64.enc(spec)}`; // rooted: the bar may be at /<id> or /new, and the spec is the whole link
   problem(plan.problems.join('\n'));
   const variants = Object.values(plan.spec.variables).reduce((a, v) => a * v.length, 1);
   const n = (x, one, many = one + 's') => `${x} ${x === 1 ? one : many}`;
@@ -643,11 +681,12 @@ function renderResponses(run) {
     const fallback = r.error ? `ERROR: ${r.error}` : '(empty reply)';
     const full = shownText(r, 'full', terms) || fallback;
     // A search opens a window on the sentences that hit, so a long reply does not hide the word you typed.
-    // Otherwise the row carries the whole reply, clipped to a few lines until it is clicked.
-    const preview = (looking.length ? shownText(r, 'matches', looking) : full) || fallback;
+    // Otherwise the row carries the excerpt chosen over the Responses tab — the ends of the reply by default,
+    // which is the quickest read of how a model answered — and the whole reply once it is clicked.
+    const preview = (looking.length ? shownText(r, 'matches', looking) : shownText(r, tableExcerpt(terms), terms)) || fallback;
     const body = preview === full
       ? markHtml(full, terms)
-      : `<span class="resp-preview">${markHtml(preview, terms)}</span><span class="resp-full">${markHtml(full, terms)}</span>`;
+      : `<span class="resp-preview">${preview === '…' ? '<span class="nomatch">no match</span>' : markHtml(preview, terms)}</span><span class="resp-full">${markHtml(full, terms)}</span>`;
     tr.innerHTML = `<td>${r.position + 1}</td><td class="model" title="${esc(r.model)}">${modelCell(r.model)}</td><td>${esc(r.variantLabel)}</td>`
       + `<td><span class="tag ${o}">${o}</span>${r.refused && r.refusal_reason ? `<div class="hint">${esc(r.refusal_reason)}</div>` : ''}</td>`
       + `<td title="${r.prompt_tokens || 0} prompt + ${r.tokens} reply${r.reasoning_tokens ? ` (${r.reasoning_tokens} thinking)` : ''}">${totalTokens(r)}</td>`
@@ -664,6 +703,7 @@ function renderResponses(run) {
   if (!rs.length) tbody.innerHTML = `<tr><td colspan="7" class="hint">${esc(emptyNote(run, select, looking))}</td></tr>`;
   const pool = looking.length ? filterResponses(run, { select }).rs.length : run.results.length;
   $('resp-count').textContent = rs.length === run.results.length ? `(${rs.length})` : `(${rs.length} of ${pool})`;
+  $('resp-mode').textContent = looking.length ? 'the sentences that matched your search' : excerptLabel(tableExcerpt(terms)).toLowerCase();
   ['btn-resp-json', 'btn-resp-csv'].forEach((id) => ($(id).disabled = !rs.length));
   renderFilters(run, select);
   renderSearchStatus(run, { looking, invalid, pool });
@@ -740,9 +780,7 @@ function renderMarked() {
   if (!currentRun) return syncRenderButton();
   currentRun.highlight = marked; // saved with the run, so `llmscope sheet <id>` marks the same words
   drawn.clear();
-  syncTabs();
-  if (!marked.length && imageOf(view).when !== 'always') setView('card');
-  else showActive(currentRun);
+  showActive(currentRun);
   syncRenderButton();
   store.saveRun(currentRun); // never rejects: a full quota is reported by the return value, not thrown
 }
@@ -753,20 +791,90 @@ function offerTerms(terms) {
   pendingChanged();
 }
 
-// ---------- the card and its tabs ----------
-// The tabs are the catalogue's rows, in its order: an image the CLI writes is an image the page offers, and one
-// added there appears here without this file changing. The ends of every reply have no tab of their own — they
-// are the Responses tab's *ends* excerpt — and download under their own name all the same.
-$('tabs').innerHTML = IMAGES.filter((i) => i.tab).map((i) =>
-  `<button id="tab-${i.kind}" class="${i.kind === view ? 'on' : ''}" disabled title="${esc(i.hint)}">${esc(i.tab)}</button>`).join('');
-for (const i of IMAGES) if (i.tab) $(`tab-${i.kind}`).addEventListener('click', () => setView(i.kind));
+// ---------- the results panel: tabs, views and the frame ----------
+// The tabs are the catalogue's TABS, in its order: what a run is read for. Under each, a button per image the
+// run draws for it, from IMAGES by its `tab` and `view` — the results card as Table, the keyword card as
+// Matches, the sentence pages as Sentences. Every view is an image: what the panel shows is what SVG and PNG
+// download, and an image added to the catalogue is a button here without this file changing.
+let tab = measureTab(null).key; // the tab on show
+const chosen = {}; // per tab, the view picked here; a pref remembers it between visits
+let excerptMode = EXCERPTS[store.getPref('excerpt', 'ends')] ? store.getPref('excerpt', 'ends') : 'ends';
+
+// "How much of each reply", in the page's words: the same three modes the CLI's rebuild menu offers, the ends of
+// every reply first because that is the quickest read of how a model answered.
+const EXCERPT_LABELS = { ends: 'First and last sentences', full: 'Full text responses', matches: 'Only matching sentences' };
+const EXCERPT_ORDER = ['ends', 'full', 'matches'];
+const excerptLabel = (mode) => EXCERPT_LABELS[mode] || EXCERPTS[mode] || mode;
+const excerptModes = () => [...EXCERPT_ORDER.filter((m) => EXCERPTS[m]), ...Object.keys(EXCERPTS).filter((m) => !EXCERPT_ORDER.includes(m))];
+/** The table's excerpt: the chosen one, except that "only matching sentences" with no words to match is every word. */
+const tableExcerpt = (terms) => (excerptMode === 'matches' && !terms.length ? 'full' : excerptMode);
+
+/**
+ * The views a tab offers for this run, in the catalogue's order: {key, label, hint, image}. `image` is the kind
+ * in the frame and behind the SVG and PNG buttons. The Responses tab has one view, the sheet, and its excerpt
+ * row decides which of the two sheet images that is.
+ */
+function viewsFor(tabKey, run) {
+  if (tabKey === 'responses') {
+    const kind = sheetKind({ select: 'all', excerpt: excerptMode });
+    return [{ key: 'responses', label: null, hint: imageOf(kind).hint, image: kind }];
+  }
+  return IMAGES.filter((i) => tabOf(i, run) === tabKey).map((i) => ({ key: i.kind, label: i.view, hint: i.hint, image: i.kind }));
+}
+
+/** The view on show under the tab on show: the one picked here or before, else the tab's first. */
+function activeView(run) {
+  const views = viewsFor(tab, run);
+  const want = chosen[tab] ?? store.getPref(`view:${tab}`, null);
+  return views.find((v) => v.key === want) || views[0];
+}
+
+/** The tabs and the rows under them, for the run on show. */
+function syncPanel(run) {
+  const tabs = tabsFor(run);
+  if (!tabs.some((t) => t.key === tab)) tab = measureTab(run).key;
+  const tabBox = $('tabs');
+  tabBox.innerHTML = tabs.map((t) => `<button role="tab" data-tab="${t.key}" class="${t.key === tab ? 'on' : ''}" aria-selected="${t.key === tab}" title="${esc(t.hint)}">${esc(t.label)}</button>`).join('');
+  tabBox.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => setTab(b.dataset.tab)));
+  const views = viewsFor(tab, run);
+  const view = activeView(run);
+  const viewBox = $('views');
+  viewBox.hidden = !views.some((v) => v.label);
+  viewBox.innerHTML = views.filter((v) => v.label).map((v) => `<button data-view="${v.key}" class="${v.key === view.key ? 'on' : ''}" title="${esc(v.hint)}">${esc(v.label)}</button>`).join('');
+  viewBox.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => setViewKey(b.dataset.view)));
+  // The excerpt is chosen over the Responses tab and read by the table under every tab.
+  const ex = $('excerpt');
+  ex.hidden = tab !== 'responses';
+  ex.innerHTML = excerptModes().map((m) => `<button data-excerpt="${m}" class="${m === excerptMode ? 'on' : ''}" title="${esc(EXCERPTS[m])}">${esc(excerptLabel(m))}</button>`).join('');
+  ex.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => setExcerpt(b.dataset.excerpt)));
+  $('card-view').hidden = !imageOf(view.image).titled; // a sheet has no heading to choose
+  syncCardView();
+}
+
+function setTab(key) {
+  tab = key;
+  if (lastPainted) { syncPanel(lastPainted); showActive(lastPainted); }
+}
+
+function setViewKey(key) {
+  chosen[tab] = key;
+  store.setPref(`view:${tab}`, key);
+  if (lastPainted) { syncPanel(lastPainted); showActive(lastPainted); }
+}
+
+function setExcerpt(mode) {
+  excerptMode = mode;
+  store.setPref('excerpt', mode);
+  if (lastPainted) { syncPanel(lastPainted); showActive(lastPainted); }
+  if (currentRun) renderResponses(currentRun);
+}
 
 /** The heading a titled image is drawn with: the keyword card remembers its own choice, the results card the other. */
 const titleFor = (kind) => (kind === 'keywords' ? keywordView : resultsView(lastPainted?.spec?.primary ?? primary()));
-const titleView = () => titleFor(view);
+const titleView = () => titleFor(activeView(lastPainted)?.image || 'card');
 
 function setCardView(next) {
-  if (view === 'keywords') { keywordView = next; store.setPref('keyword_view', next); }
+  if (activeView(lastPainted)?.image === 'keywords') { keywordView = next; store.setPref('keyword_view', next); }
   else { cardView = next; store.setPref('card_view', next); }
   syncCardView();
 }
@@ -786,71 +894,64 @@ function paint(run) {
   showResults();
   drawn.clear(); // new replies, or display names newly arrived: every image is drawn again as it is asked for
   // A streaming run repaints many times a second; the words someone typed mid-run survive all of them, and only
-  // a genuinely different run resets the box.
+  // a genuinely different run resets the box, opens on the tab of what it measured, and takes the address bar.
   if (run.id !== paintedId) {
     paintedId = run.id;
     marked = cleanTerms(markedWords(run));
     pending = marked.slice();
     $('highlight-terms').value = pending.join(', ');
+    tab = measureTab(run).key;
+    syncAddress(`/${run.id}`);
   }
   document.querySelector('.markbar').hidden = false;
-  syncTabs();
-  if (!marked.length && imageOf(view).when !== 'always') setView('card');
   ['btn-json', 'btn-share'].forEach((id) => ($(id).disabled = false));
+  syncPanel(run);
   showActive(run);
   renderResponses(run);
   syncRenderButton();
 }
 
-/** Which tabs can be opened: every image a run writes on its own, and the ones about marked words once there are words. */
-function syncTabs() {
-  for (const i of IMAGES) if (i.tab) $(`tab-${i.kind}`).disabled = i.when !== 'always' && !marked.length;
-}
-
 /**
- * What the image on show is drawn with, from the page's state: display names once the catalogue is in, the
- * heading toggle where one applies, the marked words, and the Responses tab's excerpt. Everything else stays
- * at the defaults a run is drawn with — the CLI's flags are the CLI's.
+ * What an image is drawn with, from the page's state: display names once the catalogue is in, the heading
+ * toggle where one applies, the marked words, and the Responses tab's excerpt. Everything else stays at the
+ * defaults a run is drawn with — the CLI's flags are the CLI's.
  */
 function drawOpts(kind) {
   return {
     names: Object.fromEntries(modelList.map((m) => [m.id, m.name])),
     title: imageOf(kind).titled ? titleFor(kind) : 'prompt',
     highlight: marked,
-    excerpt: kind === 'responses' ? $('sheet-excerpt').value || 'full' : 'full',
+    excerpt: kind === 'responses' ? excerptMode : 'full',
   };
+}
+
+/** One image of the run on show, drawn now or taken from the cache. */
+function drawnImage(kind, run) {
+  const opts = drawOpts(kind);
+  const key = `${opts.title}|${opts.excerpt}|${marked.join(',')}`;
+  if (drawn.get(kind)?.key !== key) drawn.set(kind, { key, ...drawImage(kind, run, opts) });
+  return drawn.get(kind);
 }
 
 /**
  * Draw the image on show, or take it from the cache, and put it in the frame. An image with nothing to draw —
- * the sentences page when none of the marked words matched — says so where the picture would be, the way the
- * CLI refuses to draw headings over nothing, and offers nothing to download.
+ * the keyword card when no words are marked, the refusals page when nothing was refused — says so where the
+ * picture would be, the way the CLI refuses to draw headings over nothing, and offers nothing to download.
  */
 function showActive(run) {
-  const opts = drawOpts(view);
-  const key = `${opts.title}|${opts.excerpt}|${marked.join(',')}`;
-  if (drawn.get(view)?.key !== key) drawn.set(view, { key, ...drawImage(view, run, opts) });
-  const { svg, empty } = drawn.get(view);
+  const view = activeView(run);
+  const { svg, empty } = drawnImage(view.image, run);
   const why = empty || 'nothing to draw';
   $('card').innerHTML = svg
-    || `<div class="empty"><p>${esc(why[0].toUpperCase() + why.slice(1))}.</p><p>Search the replies below for a word that did turn up, add it to the highlighted words, and render again.</p></div>`;
+    || `<div class="empty"><p>${esc(why[0].toUpperCase() + why.slice(1))}.</p><p>${/refused/.test(why) ? 'Every model answered every wording; the Table shows the same thing as numbers.' : 'Search the replies below for a word that did turn up, add it to the highlighted words, and render again.'}</p></div>`;
   $('btn-svg').disabled = $('btn-png').disabled = !svg;
 }
 
-function setView(v) {
-  view = v;
-  for (const i of IMAGES) if (i.tab) $(`tab-${i.kind}`).classList.toggle('on', v === i.kind);
-  $('sheet-excerpt').hidden = v !== 'responses';
-  $('card-view').hidden = !imageOf(v).titled; // a sheet has no heading to choose
-  syncCardView();
-  if (currentRun) showActive(currentRun);
-}
-
 // ---------- downloads ----------
-const activeSvg = () => drawn.get(view)?.svg || '';
-/** The image on show as the catalogue knows it: the Responses tab's ends excerpt is the ends image, here as on disk. */
-const activeKind = () => (view === 'responses' ? sheetKind({ select: 'all', excerpt: $('sheet-excerpt').value || 'full' }) : view);
-const activeName = () => `llmscope-${shownId()}${imageOf(activeKind()).suffix}`;
+const activeImageKind = () => activeView(lastPainted)?.image || null;
+/** The image in the frame, as drawn. */
+const activeSvg = () => (activeImageKind() && lastPainted ? drawnImage(activeImageKind(), lastPainted).svg : '');
+const activeName = () => `llmscope-${shownId()}${imageOf(activeImageKind()).suffix}`;
 
 function download(name, blob) {
   const a = document.createElement('a');
@@ -949,6 +1050,15 @@ async function continueWithKey() {
 }
 
 // ---------- runs ----------
+/**
+ * What the finish line says about where the run went: the site's address when it was published, and otherwise
+ * why it was not — so a run that only this browser holds is never mistaken for one anybody can open.
+ */
+const savedWords = (saved, id) => (saved.remote === 'saved' ? ` · saved to ${location.host}/${id}`
+  : saved.remote === 'offline' ? ` · kept in this browser only: ${location.host} has no registry`
+  : saved.remote === 'refused' ? ' · not saved to the site: this id is already someone else’s'
+  : '');
+
 async function start(kind) {
   await ready;
   const spec = readSpec();
@@ -964,6 +1074,7 @@ async function start(kind) {
     provider = createOpenRouterProvider({ apiKey, referer: location.origin, title: 'llmscope', models: modelList.length ? modelList : null });
   }
   abort = new AbortController();
+  const gen = ++runGen;
   $('btn-run').disabled = true;
   $('btn-stop').hidden = false;
   // The run's own id, minted here so the partial painted mid-run and the finished run are one run to the page —
@@ -989,13 +1100,18 @@ async function start(kind) {
         if (now - last > 250 || done === total) { paint(partial); last = now; }
       },
     });
+    if (gen !== runGen) return; // New eval cleared the panel while this run was winding down
     if (partial.highlight) currentRun.highlight = partial.highlight; // words marked while it streamed stay marked
     paint(currentRun);
     const errors = currentRun.results.filter((r) => r.error).length;
-    const doneLine = `${currentRun.results.length} responses · ${currentRun.aborted ? 'stopped' : 'done'} · ${provider.name}`
+    let doneLine = `${currentRun.results.length} responses · ${currentRun.aborted ? 'stopped' : 'done'} · ${provider.name}`
       + `${errors ? ` · ${errors} errors` : ''}${currentRun.cost?.priced ? ` · cost ${formatUsd(currentRun.cost.usd)}` : ''}`;
     $('progress-text').textContent = doneLine;
-    await store.saveRun(currentRun);
+    // The site keeps the run under its id, which is what makes the address on the card open for anyone. Said
+    // here, on the line that says the run is done, because a reader should know where their replies went.
+    const saved = await store.saveRun(currentRun);
+    doneLine += savedWords(saved, currentRun.id);
+    $('progress-text').textContent = doneLine;
     await renderRecent();
     if (provider.balance) {
       // What is left after this run, on the line that says what it cost; the estimate below picks it up too.
@@ -1003,11 +1119,40 @@ async function start(kind) {
       if (after?.ok) $('progress-text').innerHTML = `${esc(doneLine)} · ${balanceWords(after)}${after.remaining < (currentRun.cost?.usd || 0) ? ` · <a href="${OPENROUTER_CREDITS_URL}" target="_blank" rel="noopener">add credits ↗</a>` : ''}`;
     }
   } catch (err) {
-    problem(String(err.message || err));
+    if (gen === runGen) problem(String(err.message || err));
   } finally {
     $('btn-run').disabled = false;
     $('btn-stop').hidden = true;
   }
+}
+
+// ---------- a new eval ----------
+/**
+ * The form, empty, at /new: what New eval in the header and the link on the resolved screen do. A run opened
+ * from a card or a post is otherwise one edit away from being that eval, changed — and one click from being a
+ * different eval altogether should be as easy. The models stay ticked, since picking them is the slow part;
+ * everything else goes back to what the page says before anyone has typed, and the results panel goes away
+ * until there is a run to show in it.
+ */
+async function startNew() {
+  abort?.abort();
+  runGen += 1;
+  openedFrom = null; resolved = null; pendingEval = null; syncPending();
+  currentRun = null; lastPainted = null; paintedId = null; drawn.clear();
+  marked = []; pending = [];
+  $('highlight-terms').value = '';
+  for (const k of Object.keys(varValues)) delete varValues[k];
+  delete document.documentElement.dataset.hasResults;
+  document.querySelector('.markbar').hidden = true;
+  $('progress-text').textContent = 'no run yet';
+  $('bar').style.width = '0%';
+  ['btn-json', 'btn-share', 'btn-svg', 'btn-png'].forEach((id) => ($(id).disabled = true));
+  writeSpec(DEFAULT_FORM);
+  syncAddress('/new');
+  const hasKey = keyValue() || store.readKey();
+  setStage(hasKey ? 'app' : 'key');
+  await refresh();
+  if (hasKey) $('prompts').focus({ preventScroll: true });
 }
 
 /** Open a run this browser already has: the same path a fresh run takes, minus the requests. */
@@ -1081,13 +1226,19 @@ document.querySelectorAll('#card-view button').forEach((b) => b.addEventListener
   refresh();
 }));
 
-$('btn-svg').addEventListener('click', () => download(`${activeName()}.svg`, new Blob([activeSvg()], { type: 'image/svg+xml' })));
-$('btn-png').addEventListener('click', async () => download(`${activeName()}.png`, await svgToPng(activeSvg(), imageOf(activeKind()).size)));
+// The image behind a page view — the sentences sheet under a list of sentences — is drawn here, on the click,
+// and may come out empty when nothing matched; the button says so rather than saving an empty file.
+$('btn-svg').addEventListener('click', () => {
+  const svg = activeSvg();
+  if (!svg) return flash('btn-svg', 'Nothing to draw');
+  download(`${activeName()}.svg`, new Blob([svg], { type: 'image/svg+xml' }));
+});
+$('btn-png').addEventListener('click', async () => {
+  const svg = activeSvg();
+  if (!svg) return flash('btn-png', 'Nothing to draw');
+  download(`${activeName()}.png`, await svgToPng(svg, imageOf(activeImageKind()).size));
+});
 $('btn-json').addEventListener('click', () => download(`llmscope-${shownId()}.results.json`, new Blob([JSON.stringify(currentRun, null, 2)], { type: 'application/json' })));
-
-// "How much of each reply", the same three modes the CLI's rebuild menu offers.
-$('sheet-excerpt').innerHTML = Object.entries(EXCERPTS).map(([value, text]) => `<option value="${value}">${esc(text)}</option>`).join('');
-$('sheet-excerpt').addEventListener('change', () => { if (currentRun) showActive(currentRun); });
 
 // The marked words. Typing marks the table; the button is what reaches the images.
 $('highlight-terms').addEventListener('input', pendingChanged);
@@ -1140,7 +1291,8 @@ $('load-results').addEventListener('change', async (e) => {
     if (!Array.isArray(run.results) || !run.spec) throw new Error('not an llmscope results file');
     openedFrom = null; // a file from disk is not a fork of a published eval, any more than a reopened run is
     await openRun(run, `loaded ${file.name} · ${run.results.length} responses · ${run.provider}`);
-    await store.saveRun(run);
+    const saved = await store.saveRun(run);
+    $('progress-text').textContent += savedWords(saved, run.id);
     await renderRecent();
   } catch (err) { problem(`Could not load ${file.name}: ${err.message}`); }
   e.target.value = '';
@@ -1160,11 +1312,12 @@ const ready = (async () => {
   renderBatches();
   renderModelSets();
   syncCardView();
-  // An eval reaches the page two ways. A share link carries the whole spec in its hash, and the URL every card
-  // prints in its footer names one by id at /e/<id>. The hash is asked first because it resolves on its own,
-  // with nothing to look the id up against.
-  const shared = parseEvalRef(location.hash)
-    || (location.pathname.startsWith('/e/') ? parseEvalRef(location.pathname) : null);
+  // An eval reaches the page three ways. A share link carries the whole spec in its hash; the address every card
+  // prints in its footer names one by id at /<id> (earlier cards printed /e/<id>, which still answers); and /new
+  // asks for the form, empty. The hash is asked first because it resolves on its own, with nothing to look the
+  // id up against.
+  const fresh = location.pathname === '/new';
+  const shared = parseEvalRef(location.hash) || (EVAL_PATH.test(location.pathname) ? parseEvalRef(location.pathname) : null);
   if (!shared) {
     const sets = store.modelSets();
     if (sets.length) { checked.clear(); for (const id of sets[0]) checked.add(id); }
@@ -1174,13 +1327,22 @@ const ready = (async () => {
   await renderRecent();
   syncRenderButton();
   const plan = await refresh();
-  if (!shared) {
+  // A run this browser did itself opens where it was made, straight away. Anything else waits for the catalogue,
+  // so the cost on the resolved screen is the real one rather than a dash the reader has to watch change.
+  let found = shared ? await resolveEvalRef(shared) : null;
+  if (found?.run && (await isOwnRun(found.run.id))) {
+    await openFound(found, null);
+    found = null;
+  } else if (!shared && !fresh) {
     const last = await store.latestRunFor(plan.id);
     if (last) await openRun(last, `restored ${last.id}, the last run of this eval`);
   }
   await loadModels();
   await loadBalance();
-  // Last, so the cost on it is the real one rather than a dash the reader has to watch change.
-  if (shared) await openEvalRef(shared, null);
+  if (found) {
+    // An address nothing answers to lands on the landing page, with the reason under the box an id goes in.
+    const ok = await openFound(found, document.querySelector('.stage-landing .id-error'));
+    if (!ok) setStage('landing');
+  }
 })();
 ready.catch(console.error);
