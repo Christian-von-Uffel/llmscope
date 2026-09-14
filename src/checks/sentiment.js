@@ -4,7 +4,7 @@
 // Årup Nielsen's general-purpose list of 3,382 words and phrases scored −5 to +5, read from the `sentiment`
 // package's table. The built-in list is a few hundred words aimed at how people are described — safety and
 // threat, warmth and hostility — narrower, and closer to tone than to topic. One rule scores both (a negator up
-// to two words back flips a word and halves it), so a run's numbers and the words card drawn from its replies
+// to two words back flips a word and halves it), so a run's numbers and the word cloud drawn from its replies
 // agree with each other, and the browser scores exactly as the CLI does. Neither is a research instrument: plug
 // in your own, and everything that reads the score reads yours.
 //
@@ -39,7 +39,7 @@ const BUILTIN = {
 /**
  * The word lists a run can be scored with, by the name a spec's `sentiment_analyzer` and the CLI's `--lexicon`
  * use for them. `name` is what a run records as its analyzer, `title` how an image names the list, and `legend`
- * what its two colours mean on the words card: AFINN scores words for how good or bad they are, the built-in
+ * what its two colours mean on the word cloud: AFINN scores words for how good or bad they are, the built-in
  * list for how safe or threatened a person sounds, and a key that said "positive" over the second would be
  * claiming more than the list knows.
  */

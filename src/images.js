@@ -2,14 +2,14 @@
 //
 // The CLI writes a run's images from it and names their files by it; the browser builds its tabs from it, draws
 // them through it and names its downloads by it; the landing page's samples are drawn through it, and a test
-// holds them to it. Adding an image is adding a row here — the words card was, and reached both front ends,
+// holds them to it. Adding an image is adding a row here — the word cloud was, and reached both front ends,
 // the landing page and the tests without any of them naming it. Until this list existed each of those places kept its
 // own copy of it, and the copies drifted: the browser had no ends image and no sentences page, and named every
 // download after the eval rather than the run.
 import { analyze } from './analyze.js';
 import { renderShareCard } from './render-share.js';
 import { renderKeywordCard } from './render-keywords.js';
-import { renderWordsCard } from './render-words.js';
+import { renderWordCloud } from './render-wordcloud.js';
 import { renderResponseSheet, renderSentenceSheet, SELECTIONS } from './sheet.js';
 
 /** The words a run marks: what it was told to highlight, else the eval's own keywords. An empty edit marks nothing. */
@@ -36,9 +36,9 @@ export const IMAGES = [
     draw: (run, o) => ({ svg: renderShareCard(o.a, { width: o.size, height: o.size, names: o.names, url: o.url, date: o.date, title: o.title }) }),
   },
   {
-    kind: 'words', suffix: '.words', size: 1600, when: 'always', tab: 'Words', titled: true,
+    kind: 'wordcloud', suffix: '.wordcloud', size: 1600, when: 'always', tab: 'Word cloud', titled: true,
     hint: 'one cloud per wording: the words replies were scored on, sized by how many replies used them, green or red by which way they scored',
-    draw: (run, o) => renderWordsCard(run, o.a, { width: o.size, height: o.size, url: o.url, date: o.date, title: o.title, lexicon: o.lexicon, results: o.results ?? run.results }),
+    draw: (run, o) => renderWordCloud(run, o.a, { width: o.size, height: o.size, url: o.url, date: o.date, title: o.title, lexicon: o.lexicon, results: o.results ?? run.results }),
   },
   {
     kind: 'keywords', suffix: '.keywords', size: 1600, when: 'marked', tab: 'Keywords', titled: true,
@@ -110,8 +110,8 @@ export function imagesFor(run) {
  * @param {string} [opts.select] which replies a sheet reads (see SELECTIONS)
  * @param {string} [opts.excerpt] how much of each reply the responses sheet shows (see EXCERPTS)
  * @param {string} [opts.sort] how a sheet is batched (see SORTS and SENTENCE_SORTS)
- * @param {object[]} [opts.results] the replies the keyword and words cards count, when narrowed
- * @param {string|null} [opts.lexicon] the word list the words card counts against: 'afinn' or 'builtin'; the run's own by default (see words.js)
+ * @param {object[]} [opts.results] the replies the keyword card and the word cloud count, when narrowed
+ * @param {string|null} [opts.lexicon] the word list the word cloud counts against: 'afinn' or 'builtin'; the run's own by default (see words.js)
  * @returns {{kind: string, svg: string, empty?: string}} plus whatever the renderer reports about the page
  */
 export function drawImage(kind, run, { a = null, names = {}, url = null, date = run?.finished_at ?? null, title = 'prompt', highlight = null, size = null, select = 'all', excerpt = 'full', sort = 'group', results = null, lexicon = null, maxFont = null, columns = null, mark, layout, voice, clean } = {}) {

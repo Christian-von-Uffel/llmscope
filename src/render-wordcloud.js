@@ -1,4 +1,4 @@
-// Words card: one cloud per wording — the words a reply was scored on, sized by how many of that wording's
+// Word cloud: one cloud per wording — the words a reply was scored on, sized by how many of that wording's
 // replies used them, green or red by which way they scored.
 //
 //     “A large {Black | white | Muslim} family just moved in next door. Write two sentences…”
@@ -16,7 +16,7 @@
 // are read the same way, and every word is placed by measuring it, never by chance, so the same run always
 // draws the same card. Each cloud is fitted by shrinking its type until every word has a place, and a cloud
 // that still overflows at the smallest readable size draws the words the most replies used and counts the rest.
-import { COLORS, brandLine, runsLine } from './analyze.js';
+import { COLORS, runsLine } from './analyze.js';
 import { esc, textWidth, wrap, fit, fillLastLine, promptBlock, TITLE, GROW_MAX, monthStamp } from './render.js';
 import { quoted } from './render-share.js';
 import { spell } from './render-keywords.js';
@@ -35,6 +35,12 @@ export const WORD_MAX = 64;
 export const RATE_FULL = 0.5;
 /** What the picture is, said once under the heading. */
 export const WORDS_LINE = 'words a reply was scored on, sized by how many replies used them · words from the prompt left out';
+
+/**
+ * The top-left line. Not the measure's brand line the other cards carry: a word cloud is the same image whatever
+ * the run measured, so it names itself rather than saying "refusal rate".
+ */
+export const BRAND = 'llmscope · word cloud';
 
 /**
  * The finding as a sentence: the wording whose replies leaned hardest on negative words, and the three they
@@ -108,7 +114,7 @@ export function layoutCloud(words, W, H, maxSize) {
  * @param {string|null} [opts.lexicon] which list to count against; see words.js for the default
  * @param {object[]} [opts.results] a filtered subset of the replies; the whole run by default
  */
-export function renderWordsCard(run, a, { width = 1600, height = 1600, url = null, date = null, title = 'prompt', lexicon = null, results = run.results } = {}) {
+export function renderWordCloud(run, a, { width = 1600, height = 1600, url = null, date = null, title = 'prompt', lexicon = null, results = run.results } = {}) {
   const W = width; const H = height; const pad = 64; const maxW = W - pad * 2;
   const cw = cloudWords(run, { a, lexicon, results });
   const shareUrl = url || `${a.spec.share_base || ''}${a.id}`;
@@ -121,7 +127,7 @@ export function renderWordsCard(run, a, { width = 1600, height = 1600, url = nul
   // Top strip, as on the results card: what the image is, and when the run was.
   let y = pad + 22;
   const stamp = `${monthStamp(date)}${a.mock ? ' · MOCK DATA' : ''}`;
-  const brand = `${brandLine(a)} · words`;
+  const brand = BRAND;
   const stampW = textWidth(stamp, 26, false, true) + 2 * stamp.length;
   text(pad, y, brand, { size: fit(brand, 26, maxW - stampW - 40, true, 15, true, 2), weight: 700, fill: COLORS.muted, family: MONO, extra: 'letter-spacing="2"' });
   text(W - pad, y, stamp, { size: 26, fill: a.mock ? COLORS.accent : COLORS.muted, family: MONO, anchor: 'end', extra: 'letter-spacing="2"' });

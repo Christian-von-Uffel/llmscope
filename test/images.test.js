@@ -18,8 +18,8 @@ test('the catalogue: every image has a name of its own and says when a run write
     assert.ok(['always', 'marked', 'asked'].includes(i.when), `${i.kind}: when a run writes it`);
     assert.ok(i.hint && i.size > 0 && typeof i.draw === 'function', `${i.kind}: hint, size and a way to draw it`);
   }
-  assert.deepEqual(imagesFor(plain).map((i) => i.kind), ['card', 'words', 'responses', 'ends'], 'a run that marks nothing writes the two cards and the two sheets');
-  assert.deepEqual(imagesFor(keyword).map((i) => i.kind), ['card', 'words', 'keywords', 'responses', 'ends'], 'a run that marks words writes the keyword card too');
+  assert.deepEqual(imagesFor(plain).map((i) => i.kind), ['card', 'wordcloud', 'responses', 'ends'], 'a run that marks nothing writes the two cards and the two sheets');
+  assert.deepEqual(imagesFor(keyword).map((i) => i.kind), ['card', 'wordcloud', 'keywords', 'responses', 'ends'], 'a run that marks words writes the keyword card too');
   assert.equal(imageSuffix('ends'), '.ends');
   assert.equal(sheetKind({ select: 'all', excerpt: 'ends' }), 'ends');
   assert.equal(sheetKind({ select: 'refused', excerpt: 'ends' }), 'responses', 'only the ends of every reply are the ends image');

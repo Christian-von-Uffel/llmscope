@@ -1,4 +1,4 @@
-// The words a run's replies were scored on, counted per wording: what the words card draws.
+// The words a run's replies were scored on, counted per wording: what the word cloud draws.
 //
 // The sentiment check scores a reply against a word list and says which words counted. Pool those over every
 // reply a wording produced and you have the wording's vocabulary as the list sees it — how many replies used
@@ -8,7 +8,7 @@
 // time, and a model asked whether something is dangerous says "dangerous" back, and neither is its tone.
 //
 // A run can be counted against either list llmscope carries, whichever it was scored with, because the reply
-// text is saved: the words card of an old run, or of a run scored by a plugged-in service, is drawn from the
+// text is saved: the word cloud of an old run, or of a run scored by a plugged-in service, is drawn from the
 // replies themselves.
 import { analyze } from './analyze.js';
 import { lexiconSentiment, lexiconTokens, LEXICONS, DEFAULT_LEXICON } from './checks/sentiment.js';
