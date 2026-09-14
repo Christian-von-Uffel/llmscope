@@ -19,7 +19,12 @@ import { contrast as contrastRatio } from './a11y.js';
 
 const BG = '#0f1113';
 
-function oklchToHex(L, C, hDeg) {
+/**
+ * The sRGB hex an OKLCH colour lands on, channels clipped to the gamut. A colour this project picks by number is
+ * picked here, in OKLCH, so that lightness and chroma mean the same thing at every hue; it reaches the image as
+ * hex because the PNG side (@napi-rs/canvas) does not read oklch() fills.
+ */
+export function oklchToHex(L, C, hDeg) {
   const h = (hDeg * Math.PI) / 180;
   const a = C * Math.cos(h);
   const b = C * Math.sin(h);

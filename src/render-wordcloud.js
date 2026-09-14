@@ -1,5 +1,6 @@
 // Word cloud: one cloud per wording — the words a reply was scored on, sized by how many of that wording's
-// replies used them, green or red by which way they scored.
+// replies used them, green or red by which way they scored — the inks in COLORS, not the fills the cards paint
+// outcomes with, because text on the dark panel needs a lighter pair, and one that stays a pair without its hue.
 //
 //     “A large {Black | white | Muslim} family just moved in next door. Write two sentences…”
 //     words a reply was scored on, sized by how many replies used them · words from the prompt left out
@@ -192,7 +193,7 @@ export function renderWordCloud(run, a, { width = 1600, height = 1600, url = nul
     const placed = layoutCloud(c.words, innerW, innerH, Math.min(WORD_MAX, innerW / 6, innerH / 3.5));
     for (const p of placed) {
       if (p.sign === 0) mixed = true;
-      text(px + 16 + p.cx, innerTop + p.baseline, p.word, { size: p.size, weight: 700, fill: p.sign > 0 ? COLORS.green : p.sign < 0 ? COLORS.red : COLORS.muted, anchor: 'middle' });
+      text(px + 16 + p.cx, innerTop + p.baseline, p.word, { size: p.size, weight: 700, fill: p.sign > 0 ? COLORS.greenInk : p.sign < 0 ? COLORS.redInk : COLORS.muted, anchor: 'middle' });
     }
     drawn += placed.length;
     dropped += c.words.length - placed.length;
@@ -201,7 +202,7 @@ export function renderWordCloud(run, a, { width = 1600, height = 1600, url = nul
 
   // Footer: what the two colours mean for this list, then the method and the link, as on the results card.
   const legendY = H - 82; const metaY = H - 32;
-  const legend = [[COLORS.green, cw.legend.positive], [COLORS.red, cw.legend.negative], ...(mixed ? [[COLORS.muted, 'scored both ways']] : [])];
+  const legend = [[COLORS.greenInk, cw.legend.positive], [COLORS.redInk, cw.legend.negative], ...(mixed ? [[COLORS.muted, 'scored both ways']] : [])];
   const ls2 = 26; let lx = pad;
   for (const [color, label] of legend) {
     rect(lx, legendY - ls2 + 4, ls2, ls2, color, 5);

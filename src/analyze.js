@@ -1,5 +1,6 @@
 // Turn raw results into the grid the card renders: models x variants, per-cell counts, per-model disparity.
 import { variantCombos, comboKey, comboLabel, displayTemplate } from './spec.js';
+import { oklchToHex } from './palette.js';
 
 /** Tokens a response actually consumed: prompt (system + user) plus reply. `max_tokens` caps only the reply. */
 export function totalTokens(r) {
@@ -58,6 +59,14 @@ export const COLORS = {
   text: '#f3f4f6',
   muted: '#9aa0a6',
   accent: '#ffd166',
+  // The green and red for words set in colour on a dark panel, which is what the word cloud does. They are not
+  // the fills above: those carry white labels and, read as text on the panel, sit at 3.9:1 and 2.9:1 — and to a
+  // deuteranope they are one colour. These are chosen in OKLCH. Both clear 4.5:1 on the panel in every kind of
+  // colour vision (the red just, at 4.6:1 under protanopia: an AA red on this panel can be no darker), and the
+  // green sits a lightness step above the red, so where red and green stop being two hues — deuteranopia, a
+  // black-and-white print — they are still two weights of word. test/a11y.test.js holds the numbers.
+  greenInk: oklchToHex(0.82, 0.16, 155),
+  redInk: oklchToHex(0.70, 0.19, 25),
 };
 
 function mean(xs) {

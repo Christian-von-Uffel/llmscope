@@ -55,6 +55,26 @@ test('every piece of text on the sheet clears AA against what is behind it, in e
 });
 
 /**
+ * The word cloud sets its words in colour on the panel, and the colour is the whole cue: a positive word is green,
+ * a negative one red, and nothing else tells them apart. So the two inks have to be legible on the panel for
+ * everyone, and have to stay two colours where red and green stop being two hues — which they do by lightness:
+ * the green is a step brighter than the red, and lightness is the one thing every kind of colour vision keeps.
+ */
+test('the word cloud\'s inks clear AA on the panel and stay two colours in every kind of colour vision, because lightness carries them', () => {
+  const { greenInk, redInk, muted, panel } = COLORS;
+  for (const [what, ink] of [['a positive word', greenInk], ['a negative word', redInk], ['a word scored both ways', muted]]) {
+    const { ratio, kind } = worstContrast(ink, panel);
+    assert.ok(ratio >= 4.5, `${what} on the panel: ${ratio.toFixed(1)}:1 under ${kind}`);
+  }
+  const apart = closestPair([greenInk, redInk]);
+  assert.ok(apart.distance >= 0.1, `green and red read as two colours in the worst case: ${apart.distance.toFixed(3)} under ${apart.kind}`);
+  assert.ok(oklab(greenInk).L - oklab(redInk).L >= 0.1, 'the green is the lighter of the two, which is what a print keeps');
+  // The fills the cards paint outcomes with are the classic pair that collapses for a deuteranope (see the first
+  // test) and sit below AA as text on the panel: that is why the words are not set in them.
+  assert.ok(contrast(greenInk, panel) > contrast(COLORS.green, panel) && contrast(redInk, panel) > contrast(COLORS.red, panel));
+});
+
+/**
  * The outcome badge is the sheet's most important cue: whether a model answered or refused. Colour cannot carry
  * it, because green and red are the pair that collapses for the commonest colour blindness — so every badge also
  * carries a mark, and the marks are what these assertions defend.
