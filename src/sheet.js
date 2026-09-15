@@ -396,6 +396,9 @@ export function estimateCapacity({ size = 4096, font: f = 28, columns = null } =
 // ---------- header and legend (sized by the image, not by the body text) ----------
 /** The leading the prompt is set with, and so the height of one of its lines. */
 const TITLE_LEADING = 1.12;
+/** The most of the page the prompt may take: set to its own measure, and grown to buy the sentences page its room. */
+const HEADER_SHARE = 0.16;
+const HEADER_GROWN_SHARE = 0.3;
 
 /** The brand line's size on a sheet: the share of the image the cards give theirs (26px on 1600), so the three images read as one set. */
 export const BRAND_SCALE = 1 / 60;
@@ -406,10 +409,12 @@ function header(a, size, { extraLines = 0, gapLines = 0 } = {}) {
   const headFont = size * BRAND_SCALE;
   const quoted = a.title.prompt ? `“${a.title.prompt}”` : '';
   const width = size - pad * 2;
-  const maxHeight = size * 0.16;
   // The prompt's measure decides how many lines it takes (8-12 words each); pretext then sizes it to fill them.
   // `extraLines` lets it take a narrower measure than that and so be set larger — which the sentences page asks
-  // for when its own text would otherwise come up level with the question.
+  // for when its own text would otherwise come up level with the question. A prompt left to its measure takes
+  // at most a sixth of the page; one asked to grow may take up to HEADER_GROWN_SHARE of it, because the body
+  // under it is capped against its size, and a prompt held at a sixth left the rest of a short page blank.
+  const maxHeight = size * (extraLines ? HEADER_GROWN_SHARE : HEADER_SHARE);
   const block = fitTitleBlock(quoted, width, { maxHeight, maxSize: (size / 45) * GROW_MAX, minSize: size / 150, maxLines: readableLines(quoted) + extraLines });
   // Enough to clear the descenders of a title that may be much larger than headFont, and never less than
   // `gapLines` lines of the prompt's own leading: the question and the page under it are two things, and a page
