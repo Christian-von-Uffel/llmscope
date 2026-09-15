@@ -5,6 +5,7 @@
 //
 //   /fonts/*.ttf          the three DejaVu faces the cards are measured with, from node_modules
 //   /samples/*.png        the landing page's example images, from assets/samples/ — the PNGs the page shows
+//   /samples/runs/*.json  the runs they are drawn from, which the images link to, from assets/samples/runs/
 //   /evals/<id>.json      the bundled evals, so a share link naming one resolves on the deployed site
 //   /og.png               the social card, committed alongside the samples it is drawn from
 //
@@ -47,6 +48,8 @@ const dirFiles = async (dir, keep) =>
 
 // The PNGs only: the SVGs beside them are what the test redraws, not what the page shows.
 await into('samples', await dirFiles('assets/samples', (f) => f.endsWith('.png') && f !== 'og.png'));
+// The runs the samples are drawn from, which each sample links to, so the link opens on a host with no registry.
+await into('samples/runs', await dirFiles('assets/samples/runs', (f) => f.endsWith('.results.json')));
 await into('evals', await dirFiles('evals', (f) => f.endsWith('.json')));
 
 // The social card sits at the root of the site because that is the URL the meta tags name. It is drawn by

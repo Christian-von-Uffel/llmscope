@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { ensureText } from '../src/text.js';
 import { specId, normalizeSpec } from '../src/spec.js';
+import { imagePlace } from '../src/images.js';
 import { ROOT, SAMPLES, SAMPLES_DIR, pngName, drawSample, loadSampleRun } from '../scripts/samples.mjs';
 
 // The landing page's images are committed, so a renderer change leaves them behind unless something notices.
@@ -33,21 +34,25 @@ test('the social card is committed beside the samples', async () => {
   assert.ok(og && og.size > 0, 'assets/samples/og.png is what a posted link unfurls into; scripts/build-samples.mjs draws it');
 });
 
-// The page names each sample twice, by hand: the PNG it shows, and the eval the sample was drawn from, linked
-// under its caption so a reader can run the thing they are looking at. Both have to keep up with SAMPLES, and
-// the eval has to be one the build ships, or the link answers with nothing on a static host. The link names the
-// eval rather than the run: a run's id is fresh and only the eval is bundled. A run made before ids were minted
-// per run carries no spec_id, and its id is its eval's.
-test('the landing page shows every sample and links it to the bundled eval it was drawn from', async () => {
+// The page names each sample twice, by hand: the PNG it shows, and the run the sample was drawn from, open on
+// that image — linked from the image and from the end of its caption, so a reader can explore the thing they are
+// looking at. Both have to keep up with SAMPLES. The run answers on any host because the build ships
+// assets/samples/runs/; the eval it is a generation of has to be bundled too, so its page and its spec are there
+// for whoever changes something and runs their own. A run made before ids were minted per run carries no
+// spec_id, and its id is its eval's.
+test('the landing page shows every sample and links it to the run it was drawn from, open on that image', async () => {
   const page = await fs.readFile(path.join(ROOT, 'site', 'src', 'layouts', 'Site.astro'), 'utf8');
   for (const sample of SAMPLES) {
     const png = pngName(sample.file);
     const run = await loadSampleRun(sample.run);
     const evalId = run.spec_id ?? run.id;
     assert.ok(page.includes(`src="/samples/${png}"`), `Site.astro does not show ${png}`);
-    assert.ok(page.includes(`href="/${evalId}"`), `Site.astro does not link ${png} to /${evalId}, the eval it was drawn from`);
+    const excerpt = sample.kind === 'responses' && sample.opts.excerpt ? sample.opts.excerpt : null;
+    const href = `/${run.id}?image=${sample.kind}${excerpt ? `&amp;excerpt=${excerpt}` : ''}`;
+    assert.equal(page.split(`href="${href}"`).length - 1, 2, `Site.astro should link ${png} and its caption to ${href}, the run it was drawn from`);
+    assert.ok(imagePlace(sample.kind, run, excerpt), `${href} names an image run ${run.id} has no tab for`);
     const bundled = await fs.readFile(path.join(ROOT, 'evals', `${evalId}.json`), 'utf8').catch(() => null);
-    assert.ok(bundled !== null, `evals/${evalId}.json is missing: the link under ${png} would answer with nothing on a static host`);
+    assert.ok(bundled !== null, `evals/${evalId}.json is missing: the eval ${png} was drawn from is not bundled`);
     assert.equal(await specId(normalizeSpec(JSON.parse(bundled))), await specId(normalizeSpec(run.spec)), `evals/${evalId}.json is not the eval ${png} was drawn from`);
   }
 });

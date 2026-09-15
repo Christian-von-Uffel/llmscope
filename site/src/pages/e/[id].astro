@@ -6,6 +6,6 @@ import { evalPaths, describeEval } from '../../lib/eval-page.js';
 export const getStaticPaths = evalPaths;
 
 const { id } = Astro.params;
-const { spec } = Astro.props;
+const { spec, noun } = Astro.props;
 ---
-<Site title={`llmscope · eval ${id}`} description={describeEval(spec)} />
+<Site title={`llmscope · ${noun} ${id}`} description={describeEval(spec)} />

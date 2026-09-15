@@ -10,7 +10,7 @@ import { analyze } from './analyze.js';
 import { renderShareCard } from './render-share.js';
 import { renderKeywordCard } from './render-keywords.js';
 import { renderWordCloud } from './render-wordcloud.js';
-import { renderResponseSheet, renderSentenceSheet, renderRefusalSheet, SELECTIONS } from './sheet.js';
+import { renderResponseSheet, renderSentenceSheet, renderRefusalSheet, SELECTIONS, EXCERPTS } from './sheet.js';
 
 /** The words a run marks: what it was told to highlight, else the eval's own keywords. An empty edit marks nothing. */
 export const markedWords = (run) => run?.highlight ?? run?.spec?.keywords ?? [];
@@ -127,6 +127,25 @@ export const imageSuffix = (kind) => imageOf(kind).suffix;
  */
 export function sheetKind({ select = 'all', excerpt = 'full' } = {}) {
   return excerpt === 'ends' && select === 'all' ? 'ends' : 'responses';
+}
+
+/**
+ * Where one image of a run sits in the browser: the tab it is under, and for a responses sheet the excerpt that
+ * draws it. What an address naming an image — `/<id>?image=refusals` — opens on. Null when there is no such
+ * image, or when this run has no tab for it: the keyword card of a run that measured sentiment still has one,
+ * but the sentiment card of a refusal run does not.
+ * @returns {{tab: string, excerpt: string|null}|null}
+ */
+export function imagePlace(kind, run, excerpt = null) {
+  const image = IMAGES.find((i) => i.kind === kind);
+  if (!image) return null;
+  const tab = tabOf(image, run);
+  if (!tabsFor(run).some((t) => t.key === tab)) return null;
+  if (image.tab !== 'responses') return { tab, excerpt: null };
+  // The ends of every reply are their own image; the responses sheet is any other excerpt, the whole text unless
+  // the address names one.
+  if (kind === 'ends') return { tab, excerpt: 'ends' };
+  return { tab, excerpt: EXCERPTS[excerpt] && sheetKind({ excerpt }) === 'responses' ? excerpt : 'full' };
 }
 
 /** The images this run writes now, in order: every run's, plus the one about marked words once there are words. */

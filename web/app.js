@@ -6,7 +6,7 @@
 import { planRun, runEval, rescoreRun } from '../src/engine.js';
 import { totalTokens, outcomeOf, replyBody } from '../src/analyze.js';
 import { EXCERPTS } from '../src/sheet.js';
-import { IMAGES, tabsFor, measureTab, tabOf, imageOf, sheetKind, drawImage, markedWords } from '../src/images.js';
+import { IMAGES, tabsFor, measureTab, tabOf, imageOf, imagePlace, sheetKind, drawImage, markedWords } from '../src/images.js';
 import { RESPONSE_FILTERS, filterResponses, parseSearch, shownText, markSpans, toCsv, toJson } from '../src/responses.js';
 import { isValidKeyword, splitTerms, mergeTerms, countKeywords, cleanTerms, batchKey } from '../src/checks/keywords.js';
 import { logoBody, providerOf } from '../src/logos.js';
@@ -56,9 +56,6 @@ let pending = [];
 // The published eval this form came from, if any: {id, spec}. Kept so the form can say where it started and
 // what has moved since, and so Reset can put it back. Cleared when a run is opened from anywhere else.
 let openedFrom = null;
-let resolved = null; // the eval the resolved screen is showing
-// An eval waiting on a key: "Run it as is" with no key connected goes through the key step and lands here.
-let pendingEval = null;
 
 // null until the reader picks one, so an untouched toggle leaves the default to decide — which is the prompt,
 // whatever the card measured.
@@ -68,8 +65,7 @@ const resultsView = (p) => cardView || defaultCardTitle(p);
 // inheriting the results card's: the two images are read for different reasons.
 let keywordView = store.getPref('keyword_view', 'prompt');
 
-// Text measurement is needed by anything that draws a card, and by boot. Kept separate from `ready` so the
-// resolved screen can wait for the fonts without waiting for the rest of boot, which may be waiting on it.
+// Text measurement is needed by anything that draws a card, and by boot.
 const textReady = ensureText();
 
 // What the form says before anyone has typed: read from the markup once, before boot writes anything to it,
@@ -90,11 +86,18 @@ function setStage(name) {
 }
 
 // ---------- the address bar ----------
-// The page keeps its address honest: /<id> while a run is on show — the same address its card prints, so the
-// bar can be copied as a link — and /new on an empty form. Replaced rather than pushed, so Back still leaves.
+// The page keeps its address honest: /<id>?image=<kind> while a run is on show — the address its card prints,
+// naming the image in the frame, so the bar copied is a link to what it shows — and /new on an empty form.
+// Replaced rather than pushed, so Back still leaves.
 const EVAL_PATH = /^\/(?:e\/)?[A-Za-z0-9]{6}$/; // /<id>, and the /e/<id> earlier cards printed
 function syncAddress(path) {
-  try { if (location.pathname !== path || location.hash) history.replaceState(null, '', path); } catch { /* an origin that refuses: the bar is a nicety */ }
+  try { if (location.pathname + location.search !== path || location.hash) history.replaceState(null, '', path); } catch { /* an origin that refuses: the bar is a nicety */ }
+}
+
+/** The image an address names: `?image=<kind>`, and for the responses sheet `&excerpt=<mode>`. Null when it names none. */
+function addressedImage() {
+  const q = new URLSearchParams(location.search);
+  return q.get('image') ? { kind: q.get('image'), excerpt: q.get('excerpt') } : null;
 }
 
 // ---------- opening an eval by id ----------
@@ -130,11 +133,25 @@ async function resolveEvalRef(ref) {
     if (own) return { id: own.id, spec: normalizeSpec(own.spec), run: own };
     return (await lookupPublished(id)) || { id, spec };
   }
-  // A run's own id first, then an eval's — the newest run this browser has of it — then what the site publishes.
-  const run = (await store.loadRun(ref.id)) || (await store.latestRunFor(ref.id));
+  // A run's own id first — this browser's, the registry's, or one the build ships — then an eval's, the newest run
+  // this browser has of it, then what the site publishes.
+  const run = (await store.loadRun(ref.id)) || (await shippedRun(ref.id)) || (await store.latestRunFor(ref.id));
   if (run) { rescoreRun(run); return { id: run.id, spec: normalizeSpec(run.spec), run }; }
   return (await lookupPublished(ref.id))
     || { error: `Nothing answers to ${ref.id}: not this browser, and not this site. A run that was never saved to the site opens only from its share link or its results file.` };
+}
+
+/**
+ * A run the build ships as a plain file: the runs the landing page's samples are drawn from, copied from
+ * assets/samples/runs/. Each sample links to its run, and this is what makes that link open on any host, with a
+ * registry or without one. Null for any other id.
+ */
+async function shippedRun(id) {
+  try {
+    const res = await fetch(`/samples/runs/${id}.results.json`);
+    const run = res.ok ? await res.json() : null;
+    return Array.isArray(run?.results) ? run : null;
+  } catch { return null; } // nothing shipped under this id, or a host that answers with a page instead
 }
 
 /**
@@ -164,27 +181,38 @@ async function lookupPublished(id) {
   return null;
 }
 
-/** Whether this browser did the run itself: then it needs no look before running, and opens where it was made. */
+/** Whether this browser did the run itself: then it reopens as its own, not as a published eval to fork. */
 const isOwnRun = async (id) => (await store.listRuns()).some((e) => e.id === id);
 
-/** Show what a reference resolved to: an error where it was typed, your own run in the app, anything else on the resolved screen. */
-async function openFound(found, errorBox) {
+/**
+ * Show what a reference resolved to: an error where it was typed, or the app with the eval on its form and, when
+ * there is a run of it, the run's images and replies in the panel — open on `image` when an address named one.
+ * Nothing is sent from here, and no key is needed to look: Run is the only thing that asks for one.
+ */
+async function openFound(found, errorBox, image = null) {
   if (found.error) {
     if (errorBox) { errorBox.hidden = false; errorBox.textContent = found.error; }
     return false;
   }
   if (errorBox) errorBox.hidden = true;
-  if (found.run && (await isOwnRun(found.run.id))) {
-    openedFrom = null; // reopening your own run is not a fork of somebody's published one
-    setStage('app');
-    await openRun(found.run, `reopened ${found.run.id} · ${found.run.results.length} responses · ${found.run.provider}`);
-    return true;
+  setStage('app');
+  const own = found.run && (await isOwnRun(found.run.id));
+  // Somebody else's eval becomes the origin every later edit is measured against; reopening your own run is not
+  // a fork of anything.
+  openedFrom = own ? null : { id: found.id, spec: found.spec };
+  if (found.run) {
+    await openRun(found.run, `${own ? 'reopened' : 'opened'} ${found.run.id} · ${found.run.results.length} responses · ${found.run.provider}`, image);
+    // What was opened is the run, so on a screen narrow enough to stack the panel under the form, go to it.
+    const panel = document.querySelector('.panel.results');
+    if (panel.getBoundingClientRect().top > window.innerHeight / 2) panel.scrollIntoView({ block: 'start' });
+  } else {
+    writeSpec(found.spec);
+    await refresh();
   }
-  await showResolved(found);
   return true;
 }
 
-/** Show the eval, whatever it came from, before a single request is sent. */
+/** Open the eval, whatever it came from. */
 const openEvalRef = async (ref, errorBox) => openFound(await resolveEvalRef(ref), errorBox);
 
 // The header's Open… menu. Focus lands in the id box when it opens; it closes once something has been opened,
@@ -221,63 +249,6 @@ for (const el of document.querySelectorAll('[data-go]')) {
   });
 }
 
-// ---------- the resolved screen ----------
-const nOf = (x, one, many = one + 's') => `${x} ${x === 1 ? one : many}`;
-const MEASURE = { refusal: 'Refusals', keyword: 'Keywords or phrases', sentiment: 'Sentiment' };
-
-/** The eval's shape in the words the form uses for the same things. */
-function evalDetail(spec) {
-  const rows = [];
-  for (const [name, values] of Object.entries(spec.variables || {})) {
-    rows.push([`{${name}}`, values.map((v) => v || '(none)').join(' · ')]);
-  }
-  rows.push(['Measures', MEASURE[spec.primary] || spec.primary]);
-  if (spec.primary === 'keyword') rows.push(['Words', spec.keywords.length ? spec.keywords.join(', ') : 'none yet — chosen after reading the replies']);
-  const names = spec.models.map((m) => prettyModel(m));
-  rows.push(['Models', `${spec.models.length} — ${names.slice(0, 3).join(', ')}${names.length > 3 ? `, +${names.length - 3}` : ''}`]);
-  return rows;
-}
-
-/** A model's display name if the catalogue has arrived, else the half of the id that names the model. */
-const prettyModel = (id) => (modelList.find((m) => m.id === id)?.name || id).replace(/^[^:]+:\s*/, '').trim();
-
-/**
- * The screen between seeing an eval somewhere and running it: what it asks, of whom, and what it will cost on
- * your key. Nothing is sent from here — the two buttons are the only ways out.
- */
-async function showResolved(found) {
-  resolved = found;
-  const { spec, id, run } = found;
-  const plan = await planRun(spec);
-  $('resolved-id').textContent = id || plan.id;
-  $('resolved-prompt').innerHTML = `&ldquo;${highlightSlots(spec.prompts[0] || '')}&rdquo;`;
-  paintResolvedDetail(spec, plan);
-  // The card only exists where the replies do; an eval published as a spec alone has no picture yet.
-  const card = $('resolved-card');
-  card.hidden = !run;
-  document.querySelector('.resolved-grid').classList.toggle('no-card', !run);
-  if (run) { await textReady; card.innerHTML = drawImage('card', run, { names: Object.fromEntries(modelList.map((m) => [m.id, m.name])), date: run.finished_at }).svg; }
-  setStage('resolved');
-}
-
-function paintResolvedDetail(spec, plan) {
-  const rows = evalDetail(spec);
-  rows.push(['Repeats', `${nOf(spec.runs, 'run')} per cell, so ${nOf(plan.jobs.length, 'request')}`]);
-  rows.push(['Your cost', costLine(plan)]);
-  $('resolved-detail').innerHTML = rows.map(([k, v]) =>
-    `<div class="row"><dt>${esc(k)}</dt><dd>${v}</dd></div>`).join('');
-}
-
-/** The prompt with its slots marked, the way the card marks them. */
-const highlightSlots = (text) => esc(text).replace(/\{[^{}]+\}/g, (m) => `<b>${m}</b>`);
-
-/** What a run of this plan costs, once the catalogue is in. */
-function costLine(plan) {
-  if (!modelList.length || !plan.jobs.length) return '<b>—</b> on your own OpenRouter key';
-  const c = estimateCost(plan, modelList);
-  return `<b>≈ ${formatUsd(c.typical)}</b> on your own OpenRouter key${balanceHtml(c.typical)}`;
-}
-
 // ---------- the balance ----------
 /** "$1.20 left on OpenRouter", naming the key's own limit when that is what stops a run first. */
 const balanceWords = (b) => `${formatUsd(b.remaining)} in credits left${b.ceiling === 'key' ? ' under this key’s spend limit' : ''}`;
@@ -296,36 +267,7 @@ async function loadBalance() {
   const key = keyValue() || store.readKey();
   balance = key ? await fetchBalance({ apiKey: key }) : null;
   await refresh();
-  if (resolved && document.documentElement.dataset.stage === 'resolved') paintResolvedDetail(resolved.spec, await planRun(resolved.spec));
   return balance;
-}
-
-/** Put a resolved eval on the form. Its id becomes the origin every later edit is measured against. */
-async function adoptResolved() {
-  if (!resolved) return;
-  openedFrom = resolved.id ? { id: resolved.id, spec: resolved.spec } : null;
-  writeSpec(resolved.spec);
-  await refresh();
-  if (resolved.run) await openRun(resolved.run, `opened ${resolved.id} · ${resolved.run.results.length} responses · ${resolved.run.provider}`);
-}
-
-/** Where "Run it as is" and "Change something first" go: straight to work, or through the key first. */
-async function leaveResolved(andRun) {
-  if (!store.readKey() && !keyValue()) {
-    pendingEval = { spec: resolved.spec, id: resolved.id, run: andRun };
-    syncPending();
-    return setStage('key');
-  }
-  setStage('app');
-  await adoptResolved();
-  if (andRun) start('openrouter');
-}
-
-function syncPending() {
-  const box = $('key-pending');
-  box.hidden = !pendingEval;
-  if (!pendingEval) return;
-  box.innerHTML = `Waiting to run <code>${esc(pendingEval.id || 'this eval')}</code>${pendingEval.line ? ` · ${esc(pendingEval.line)}` : ''}`;
 }
 
 // ---------- things this browser has typed before ----------
@@ -893,19 +835,29 @@ function showResults() {
   document.documentElement.dataset.hasResults = '';
 }
 
-function paint(run) {
+/**
+ * Paint a run into the panel. `image` — {kind, excerpt}, from an address — opens a newly painted run on that
+ * image rather than on the tab of what it measured, for this visit only: it is not remembered as the reader's
+ * choice of view, the way the buttons are.
+ */
+function paint(run, image = null) {
   lastPainted = run;
   showResults();
   drawn.clear(); // new replies, or display names newly arrived: every image is drawn again as it is asked for
   // A streaming run repaints many times a second; the words someone typed mid-run survive all of them, and only
-  // a genuinely different run resets the box, opens on the tab of what it measured, and takes the address bar.
+  // a genuinely different run resets the box and opens on the tab of what it measured.
   if (run.id !== paintedId) {
     paintedId = run.id;
     marked = cleanTerms(markedWords(run));
     pending = marked.slice();
     $('highlight-terms').value = pending.join(', ');
     tab = measureTab(run).key;
-    syncAddress(`/${run.id}`);
+    const place = image && imagePlace(image.kind, run, image.excerpt);
+    if (place) {
+      tab = place.tab;
+      chosen[tab] = image.kind;
+      if (place.excerpt) excerptMode = place.excerpt;
+    }
   }
   document.querySelector('.markbar').hidden = false;
   ['btn-json', 'btn-share'].forEach((id) => ($(id).disabled = false));
@@ -949,6 +901,8 @@ function showActive(run) {
   $('card').innerHTML = svg
     || `<div class="empty"><p>${esc(why[0].toUpperCase() + why.slice(1))}.</p><p>${/refused/.test(why) ? 'Every model answered every wording; the Table shows the same thing as numbers.' : 'Search the replies below for a word that did turn up, add it to the highlighted words, and render again.'}</p></div>`;
   $('btn-svg').disabled = $('btn-png').disabled = !svg;
+  // The bar names the image in the frame, so copying it shares this view; the responses sheet adds its excerpt.
+  syncAddress(`/${run.id}?image=${view.image}${view.image === 'responses' ? `&excerpt=${excerptMode}` : ''}`);
 }
 
 // ---------- downloads ----------
@@ -1043,13 +997,6 @@ async function continueWithKey() {
   syncKeyBadge();
   setStage('app');
   refresh(); // the estimate now knows the balance
-  if (pendingEval) {
-    const { run } = pendingEval;
-    pendingEval = null;
-    syncPending();
-    await adoptResolved();
-    if (run) return start('openrouter');
-  }
   $('prompts').focus();
 }
 
@@ -1132,7 +1079,7 @@ async function start(kind) {
 
 // ---------- a new eval ----------
 /**
- * The form, empty, at /new: what New eval in the header and the link on the resolved screen do. A run opened
+ * The form, empty, at /new: what New eval in the header does. A run opened
  * from a card or a post is otherwise one edit away from being that eval, changed — and one click from being a
  * different eval altogether should be as easy. The models stay ticked, since picking them is the slow part;
  * everything else goes back to what the page says before anyone has typed, and the results panel goes away
@@ -1141,7 +1088,7 @@ async function start(kind) {
 async function startNew() {
   abort?.abort();
   runGen += 1;
-  openedFrom = null; resolved = null; pendingEval = null; syncPending();
+  openedFrom = null;
   currentRun = null; lastPainted = null; paintedId = null; drawn.clear();
   marked = []; pending = [];
   $('highlight-terms').value = '';
@@ -1159,14 +1106,14 @@ async function startNew() {
   if (hasKey) $('prompts').focus({ preventScroll: true });
 }
 
-/** Open a run this browser already has: the same path a fresh run takes, minus the requests. */
-async function openRun(run, note) {
+/** Open a finished run: the same path a fresh run takes, minus the requests. `image` as paint takes it. */
+async function openRun(run, note, image = null) {
   rescoreRun(run);
   currentRun = run;
   paintedId = null;
   writeSpec(run.spec);
   await refresh();
-  paint(run);
+  paint(run, image);
   $('progress-text').textContent = note;
 }
 
@@ -1215,8 +1162,6 @@ $('apikey').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.prev
 $('btn-unlock').addEventListener('click', () => continueWithKey());
 $('btn-change-key').addEventListener('click', () => { fillKey(store.readKey()); setStage('key'); });
 
-$('btn-run-as-is').addEventListener('click', () => leaveResolved(true));
-$('btn-change-first').addEventListener('click', () => leaveResolved(false));
 $('btn-run').addEventListener('click', () => start('openrouter'));
 $('btn-stop').addEventListener('click', () => abort?.abort());
 $('btn-share').addEventListener('click', async () => {
@@ -1331,22 +1276,17 @@ const ready = (async () => {
   await renderRecent();
   syncRenderButton();
   const plan = await refresh();
-  // A run this browser did itself opens where it was made, straight away. Anything else waits for the catalogue,
-  // so the cost on the resolved screen is the real one rather than a dash the reader has to watch change.
-  let found = shared ? await resolveEvalRef(shared) : null;
-  if (found?.run && (await isOwnRun(found.run.id))) {
-    await openFound(found, null);
-    found = null;
-  } else if (!shared && !fresh) {
+  // An eval named in the address opens straight away, on the image the address names if it names one; the
+  // display names follow when the catalogue arrives. An address nothing answers to lands on the landing page,
+  // with the reason under the box an id goes in.
+  if (shared) {
+    const ok = await openFound(await resolveEvalRef(shared), document.querySelector('.stage-landing .id-error'), addressedImage());
+    if (!ok) setStage('landing');
+  } else if (!fresh) {
     const last = await store.latestRunFor(plan.id);
     if (last) await openRun(last, `restored ${last.id}, the last run of this eval`);
   }
   await loadModels();
   await loadBalance();
-  if (found) {
-    // An address nothing answers to lands on the landing page, with the reason under the box an id goes in.
-    const ok = await openFound(found, document.querySelector('.stage-landing .id-error'));
-    if (!ok) setStage('landing');
-  }
 })();
 ready.catch(console.error);
