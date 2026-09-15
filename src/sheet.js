@@ -791,10 +791,19 @@ function flow(lines, g, limit = g.colH) {
   const placed = [];
   let col = 0;
   let y = 0;
-  for (const line of lines) {
+  // How many lines each heading actually has under it, up to the next heading. A heading keeps the first lines
+  // of what it introduces, but only lines that exist: a wording with one line under it asks for that line, not
+  // for four, or a short last batch would hold the whole page short of its foot and the text short of its size.
+  const under = new Array(lines.length);
+  for (let i = lines.length - 1, next = lines.length; i >= 0; i--) {
+    under[i] = next - i - 1;
+    if (lines[i].first && lines[i].para.keep) next = i;
+  }
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
     // A heading alone at the foot of a column heads nothing: it asks to keep the first lines of what it
     // introduces, and takes the next column with them rather than being read as the end of the column above.
-    const keep = line.first ? line.para.keep || 0 : 0;
+    const keep = line.first ? Math.min(line.para.keep || 0, under[i]) : 0;
     // A heading set larger than the page reaches further above its baseline than an ordinary line does. That
     // extra ascent is reserved here — including when the paragraph starts a fresh column, where there is no
     // paragraph gap to hide in and the heading would otherwise ride up into the prompt.
@@ -873,6 +882,32 @@ function fitPage(linesFor, { size, headerH, legendH, columns = null, minFont = 6
   // the page is blank.
   const { placed, g } = stretch(balance(best.lines, best.g).placed, best.g);
   return { ...best, placed, g };
+}
+
+/**
+ * The prompt and the body's size cap for a page set on a scale — the sentences pages — where the body is capped
+ * against the prompt so a wording never comes up level with the question. Capping the body alone would empty
+ * the page, so the prompt is grown first: it is asked for the size that leaves the body exactly its share, and
+ * takes a narrower measure — more lines — to reach it. When the prompt is as big as it gets and the page is
+ * still short, the body rises past its share instead, as far as it can with the model name still a full step
+ * above it and the wording still under its own share of the prompt: the ranks close up rather than the page
+ * going blank. `fitWith(head, cap)` is the page's own fit under a given prompt.
+ */
+function scaledHeader(a, size, { gapLines, heading, name, maxFont, fitWith }) {
+  let head = header(a, size, { gapLines });
+  const cap = maxFont || null;
+  if (!(heading > 1 || name > 1)) return { head, cap };
+  const want = fitWith(head, cap).f / BODY_OF_PROMPT;
+  for (let extra = 1; extra <= 4 && head.block.size < want; extra++) {
+    const grown = header(a, size, { extraLines: extra, gapLines });
+    if (grown.block.size <= head.block.size) break; // the prompt has stopped growing; it is as big as it gets
+    head = grown;
+  }
+  const share = head.block.size * BODY_OF_PROMPT;
+  const room = fitWith(head, cap).f; // what the page holds under the grown prompt, the scale's own clamps included
+  // The most the body may rise to: the name a full step over it, held under the wording, held under the prompt.
+  const ceiling = head.block.size * HEADING_OF_PROMPT * NAME_OF_HEADING / Math.max(name, 1);
+  return { head, cap: Math.min(cap || Infinity, Math.max(share, Math.min(room, ceiling))) };
 }
 
 /**
@@ -1163,20 +1198,7 @@ export function renderSentenceSheet(run, { size = 4096, maxFont = null, minFont 
   // question the way it always has.
   const gapLines = layout === 'flow' ? 0 : 1;
   // At one size the page is laid out like any other: the body takes whatever size fills the square.
-  let head = header(a, size, { gapLines });
-  let cap = maxFont || null;
-  if (heading > 1 || name > 1) {
-    // A scale has to leave room under the prompt, or the wording comes up level with the question. Capping the
-    // body alone would empty the page, so the prompt is grown instead: it is asked for the size that leaves the
-    // body exactly its share, and takes a narrower measure — more lines — to reach it.
-    const want = fitWith(head, cap).f / BODY_OF_PROMPT;
-    for (let extra = 1; extra <= 4 && head.block.size < want; extra++) {
-      const grown = header(a, size, { extraLines: extra, gapLines });
-      if (grown.block.size <= head.block.size) break; // the prompt has stopped growing; it is as big as it gets
-      head = grown;
-    }
-    cap = Math.min(cap || Infinity, head.block.size * BODY_OF_PROMPT);
-  }
+  const { head, cap } = scaledHeader(a, size, { gapLines, heading, name, maxFont, fitWith });
   const best = fitWith(head, cap);
   const words = terms.length - found.missing.length;
   // The right-hand summary counts what is on the page against what was looked for: a word that turned up in no
@@ -1277,17 +1299,7 @@ export function renderRefusalSheet(run, { size = 4096, maxFont = null, minFont =
     { size, headerH: h.headerH, legendH: leg.height, columns, minFont, maxFont: cap },
   );
   const gapLines = layout === 'flow' ? 0 : 1;
-  let head = header(a, size, { gapLines });
-  let cap = maxFont || null;
-  if (heading > 1 || name > 1) {
-    const want = fitWith(head, cap).f / BODY_OF_PROMPT;
-    for (let extra = 1; extra <= 4 && head.block.size < want; extra++) {
-      const grown = header(a, size, { extraLines: extra, gapLines });
-      if (grown.block.size <= head.block.size) break;
-      head = grown;
-    }
-    cap = Math.min(cap || Infinity, head.block.size * BODY_OF_PROMPT);
-  }
+  const { head, cap } = scaledHeader(a, size, { gapLines, heading, name, maxFont, fitWith });
   const best = fitWith(head, cap);
   const refusers = new Set(found.lines.map((l) => l.response.model)).size;
   const metaParts = [
