@@ -19,6 +19,12 @@ import { contrast as contrastRatio } from './a11y.js';
 
 const BG = '#0f1113';
 
+/** `hex` mixed `amount` of the way into `onto`, as a solid colour. A wash drawn as one fill rather than as a layer. */
+export function mix(hex, onto, amount) {
+  const ch = (h, i) => parseInt(h.slice(1 + i * 2, 3 + i * 2), 16);
+  return '#' + [0, 1, 2].map((i) => Math.round(ch(onto, i) + (ch(hex, i) - ch(onto, i)) * amount).toString(16).padStart(2, '0')).join('');
+}
+
 /**
  * The sRGB hex an OKLCH colour lands on, channels clipped to the gamut. A colour this project picks by number is
  * picked here, in OKLCH, so that lightness and chroma mean the same thing at every hue; it reaches the image as

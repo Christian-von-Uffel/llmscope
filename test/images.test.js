@@ -47,7 +47,7 @@ test('the refusals page is written by every run, and says so when nothing was re
   const page = drawImage('refusals', refusing);
   assert.ok(page.svg.startsWith('<svg'));
   assert.equal(page.refused, refusing.results.length, 'every reply of this run refused');
-  assert.ok(page.svg.includes('· refusals<'), 'headed as the refusals page');
+  assert.ok(!page.svg.includes('· refusals<'), 'headed like the cards: the brand line names the measure, not the page');
   const none = drawImage('refusals', answering);
   assert.equal(none.svg, '');
   assert.equal(none.empty, 'nothing in this run was refused');

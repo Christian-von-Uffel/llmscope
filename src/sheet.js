@@ -20,9 +20,9 @@ import { COLORS, analyze, brandLine, keywordPhrase, outcomeOf } from './analyze.
 import { findKeywordSpans, stripPattern } from './checks/keywords.js';
 import { sentences, sentenceBatches, refusalBatches, SENTENCE_SORTS } from './sentences.js';
 import { refusalSpans } from './checks/refusal.js';
-import { esc, wrap, fitTitleBlock, readableLines, shortModel, GROW_MAX, titleLine } from './render.js';
+import { esc, wrap, fitTitleBlock, readableLines, mostLines, shortModel, GROW_MAX, titleLine, monthStamp } from './render.js';
 import { logoBody, providerOf } from './logos.js';
-import { modelColors, contrast } from './palette.js';
+import { modelColors, contrast, mix } from './palette.js';
 import { font, measureWidth, pinTextWidths, textReady, SANS, MONO, FONT_METRICS } from './text.js';
 
 
@@ -127,11 +127,6 @@ const HEADING_OF_PROMPT = 0.62;
 /** And the name stays under the heading, however the two are arrived at. */
 const NAME_OF_HEADING = 0.85;
 const TINT_OPACITY = 0.3;
-/** `hex` mixed `amount` of the way into `onto`, as a solid colour. A wash drawn as one fill rather than as a layer. */
-function mix(hex, onto, amount) {
-  const ch = (h, i) => parseInt(h.slice(1 + i * 2, 3 + i * 2), 16);
-  return '#' + [0, 1, 2].map((i) => Math.round(ch(onto, i) + (ch(hex, i) - ch(onto, i)) * amount).toString(16).padStart(2, '0')).join('');
-}
 
 export const MARK_BG = COLORS.accent;
 export const MARK_TEXT = COLORS.bg;
@@ -396,9 +391,15 @@ export function estimateCapacity({ size = 4096, font: f = 28, columns = null } =
 // ---------- header and legend (sized by the image, not by the body text) ----------
 /** The leading the prompt is set with, and so the height of one of its lines. */
 const TITLE_LEADING = 1.12;
+/** The most of the page the prompt may take: set to its own measure, and grown to buy the sentences page its room. */
+const HEADER_SHARE = 0.16;
+const HEADER_GROWN_SHARE = 0.3;
 
 /** The brand line's size on a sheet: the share of the image the cards give theirs (26px on 1600), so the three images read as one set. */
 export const BRAND_SCALE = 1 / 60;
+
+/** The gap the cards leave between the brand line and the prompt (40px on 1600), as a share of the image. */
+const CARD_BRAND_GAP = 40 / 1600;
 
 function header(a, size, { extraLines = 0, gapLines = 0 } = {}) {
   const pad = Math.round(size * 0.03);
@@ -406,17 +407,24 @@ function header(a, size, { extraLines = 0, gapLines = 0 } = {}) {
   const headFont = size * BRAND_SCALE;
   const quoted = a.title.prompt ? `“${a.title.prompt}”` : '';
   const width = size - pad * 2;
-  const maxHeight = size * 0.16;
   // The prompt's measure decides how many lines it takes (8-12 words each); pretext then sizes it to fill them.
   // `extraLines` lets it take a narrower measure than that and so be set larger — which the sentences page asks
-  // for when its own text would otherwise come up level with the question.
-  const block = fitTitleBlock(quoted, width, { maxHeight, maxSize: (size / 45) * GROW_MAX, minSize: size / 150, maxLines: readableLines(quoted) + extraLines });
+  // for when its own text would otherwise come up level with the question. A prompt left to its measure takes
+  // at most a sixth of the page; one asked to grow may take up to HEADER_GROWN_SHARE of it, because the body
+  // under it is capped against its size, and a prompt held at a sixth left the rest of a short page blank.
+  const maxHeight = size * (extraLines ? HEADER_GROWN_SHARE : HEADER_SHARE);
+  // The extra lines stop where a line would fall under MEASURE.minWords: a prompt grown past that reads as a column
+  // of stubs, and the larger size does not buy it back.
+  const maxLines = Math.min(readableLines(quoted) + extraLines, mostLines(quoted));
+  const block = fitTitleBlock(quoted, width, { maxHeight, maxSize: (size / 45) * GROW_MAX, minSize: size / 150, maxLines });
+  // The cards' gap between the brand line and the question, so the heading of every image a run draws sits alike.
+  const gapAbove = size * CARD_BRAND_GAP;
   // Enough to clear the descenders of a title that may be much larger than headFont, and never less than
   // `gapLines` lines of the prompt's own leading: the question and the page under it are two things, and a page
   // that starts a line after the prompt ends reads as its continuation.
   const titleGap = Math.max(headFont * 1.8 + block.size * 0.15, block.size * TITLE_LEADING * gapLines);
-  const height = Math.round(headFont + block.lines.length * block.size * TITLE_LEADING + titleGap);
-  return { headFont, block, titleGap, headerH: height };
+  const height = Math.round(headFont + gapAbove + block.lines.length * block.size * TITLE_LEADING + titleGap);
+  return { headFont, block, titleGap, gapAbove, headerH: height };
 }
 
 /** Width of one column when the image has four (the 4K layout): the URL in the legend is exactly this wide. */
@@ -879,7 +887,7 @@ function fitPage(linesFor, { size, headerH, legendH, columns = null, minFont = 6
  *   keywords; an empty array marks nothing. Marking is presentation only: no verdict, rate or card changes.
  * @returns {{svg:string, font:number, columns:number, replies:number, exact:boolean, fill:number, highlight:string[]}}
  */
-export function renderResponseSheet(run, { size = 4096, maxFont = null, minFont = 6, columns = null, select = 'all', url = null, highlight = null, excerpt: mode = 'full', sort: order = 'group' } = {}) {
+export function renderResponseSheet(run, { size = 4096, maxFont = null, minFont = 6, columns = null, select = 'all', url = null, highlight = null, excerpt: mode = 'full', sort: order = 'group', date = run?.finished_at ?? null } = {}) {
   const sort = SORTS[order] ? order : 'group';
   const { analysis: a, responses } = selectResponses(run, select, sort);
   const colors = modelColors(a.rows.map((r) => r.model));
@@ -892,7 +900,7 @@ export function renderResponseSheet(run, { size = 4096, maxFont = null, minFont 
   // The ends image is its own image, and its brand line says so: a reader who meets it alone should not take it
   // for the sheet with the replies cut short by accident.
   const kind = excerptMode === 'ends' ? 'first and last sentences' : 'responses';
-  const svg = pinTextWidths(renderSvg(best, { a, size, select, responses: responses.length, run, shareUrl, colors, head, leg, sort, kind }));
+  const svg = pinTextWidths(renderSvg(best, { a, size, select, responses: responses.length, run, shareUrl, colors, head, leg, sort, kind, date }));
   return { svg, font: best.f, columns: best.g.columns, replies: responses.length, exact: textReady(), fill: columnFill(best.placed, best.g), highlight: terms, excerpt: excerptMode, sort };
 }
 
@@ -1139,7 +1147,7 @@ export const SENTENCE_DEFAULTS = { mark: 'wash-rule', layout: 'rows', voice: 'ne
  * @param {string} [opts.select] which replies to read sentences out of (see SELECTIONS)
  * @returns {{svg:string, font:number, columns:number, matches:number, sentences:number, words:number, sort:string, batches:Array<{key:string, label:string, matches:number, sentences:number, replies:number, models:string[], groups:string[], terms:string[], split:Array<{label:string, matches:number, sentences:number, replies:number}>}>, missing:string[], replies:number, exact:boolean, fill:number, highlight:string[]}}
  */
-export function renderSentenceSheet(run, { size = 4096, maxFont = null, minFont = 6, columns = null, select = 'all', url = null, highlight = null, sort: order = 'group', mark: markOption = SENTENCE_DEFAULTS.mark, heading = HEADING_SCALE, name = NAME_SCALE, layout: layoutOption = SENTENCE_DEFAULTS.layout, voice: voiceOption = SENTENCE_DEFAULTS.voice, clean = SENTENCE_DEFAULTS.clean } = {}) {
+export function renderSentenceSheet(run, { size = 4096, maxFont = null, minFont = 6, columns = null, select = 'all', url = null, highlight = null, date = run?.finished_at ?? null, sort: order = 'group', mark: markOption = SENTENCE_DEFAULTS.mark, heading = HEADING_SCALE, name = NAME_SCALE, layout: layoutOption = SENTENCE_DEFAULTS.layout, voice: voiceOption = SENTENCE_DEFAULTS.voice, clean = SENTENCE_DEFAULTS.clean } = {}) {
   const by = SENTENCE_SORTS[order] ? order : 'group';
   const markStyle = MARK_STYLES[markOption] ? markOption : SENTENCE_DEFAULTS.mark;
   const layout = SENTENCE_LAYOUTS[layoutOption] ? layoutOption : SENTENCE_DEFAULTS.layout;
@@ -1181,7 +1189,7 @@ export function renderSentenceSheet(run, { size = 4096, maxFont = null, minFont 
     `${found.matches} keyword match${found.matches === 1 ? '' : 'es'} in ${found.sentences} sentence${found.sentences === 1 ? '' : 's'} from ${found.replies} of ${responses.length} repl${responses.length === 1 ? 'y' : 'ies'}`,
     `${found.missing.length ? `${words} of ${terms.length}` : words} marked word${terms.length === 1 ? '' : 's'}`,
   ];
-  const svg = pinTextWidths(renderSvg(best, { a, size, select, responses: responses.length, run, shareUrl, colors, head, leg, sort: by === 'model' ? 'model' : 'group', kind: 'sentences', metaParts, logos: true, markStyle }));
+  const svg = pinTextWidths(renderSvg(best, { a, size, select, responses: responses.length, run, shareUrl, colors, head, leg, sort: by === 'model' ? 'model' : 'group', kind: 'sentences', metaParts, logos: true, markStyle, date }));
   // The batches as counts rather than as the lines themselves: what a caller wants from this is the tally under
   // the image, and handing back the replies would hand back the whole run a second time. Each batch also carries
   // its split down the other axis — a wording broken out by model, a model by wording — because "which model is
@@ -1250,7 +1258,7 @@ export const refusalNote = (by = 'group') => refusalNoteParts(by).join(' · ');
  *   select, size, maxFont, columns, url
  * @returns {{svg:string, font:number, columns:number, refused:number, replies:number, sort:string, batches:Array<{key:string, label:string, refused:number, replies:number, models:string[]}>, exact:boolean, fill:number}}
  */
-export function renderRefusalSheet(run, { size = 4096, maxFont = null, minFont = 6, columns = null, select = 'all', url = null, sort: order = 'group', mark: markOption = SENTENCE_DEFAULTS.mark, heading = HEADING_SCALE, name = NAME_SCALE, layout: layoutOption = SENTENCE_DEFAULTS.layout, voice: voiceOption = SENTENCE_DEFAULTS.voice, clean = SENTENCE_DEFAULTS.clean } = {}) {
+export function renderRefusalSheet(run, { size = 4096, maxFont = null, minFont = 6, columns = null, select = 'all', url = null, date = run?.finished_at ?? null, sort: order = 'group', mark: markOption = SENTENCE_DEFAULTS.mark, heading = HEADING_SCALE, name = NAME_SCALE, layout: layoutOption = SENTENCE_DEFAULTS.layout, voice: voiceOption = SENTENCE_DEFAULTS.voice, clean = SENTENCE_DEFAULTS.clean } = {}) {
   const by = order === 'model' ? 'model' : 'group';
   const markStyle = MARK_STYLES[markOption] ? markOption : SENTENCE_DEFAULTS.mark;
   const layout = SENTENCE_LAYOUTS[layoutOption] ? layoutOption : SENTENCE_DEFAULTS.layout;
@@ -1289,7 +1297,7 @@ export function renderRefusalSheet(run, { size = 4096, maxFont = null, minFont =
     `${found.refused} refusal${found.refused === 1 ? '' : 's'} in ${responses.length} repl${responses.length === 1 ? 'y' : 'ies'}`,
     `${refusers} of ${a.rows.length} model${a.rows.length === 1 ? '' : 's'} refused`,
   ];
-  const svg = pinTextWidths(renderSvg(best, { a, size, select, responses: responses.length, run, shareUrl, colors, head, leg, sort: by, kind: 'refusals', metaParts, logos: true, markStyle, markColor: REFUSAL_MARK }));
+  const svg = pinTextWidths(renderSvg(best, { a, size, select, responses: responses.length, run, shareUrl, colors, head, leg, sort: by, kind: 'refusals', metaParts, logos: true, markStyle, markColor: REFUSAL_MARK, date }));
   return {
     svg, font: best.f, columns: best.g.columns, refused: found.refused, replies: found.replies, sort: by, mark: markStyle, layout, voice, clean,
     batches: found.batches.map((b) => ({ key: b.key, label: b.label, refused: b.refused, replies: b.replies, models: b.refusers })),
@@ -1297,7 +1305,7 @@ export function renderRefusalSheet(run, { size = 4096, maxFont = null, minFont =
   };
 }
 
-function renderSvg({ f, g, placed }, { a, size, select, responses, run, shareUrl, colors, head, leg, sort = 'group', kind = 'responses', metaParts = null, logos = sort !== 'model', markStyle = 'block', markColor = MARK_BG }) {
+function renderSvg({ f, g, placed }, { a, size, select, responses, run, shareUrl, colors, head, leg, sort = 'group', kind = 'responses', metaParts = null, logos = sort !== 'model', markStyle = 'block', markColor = MARK_BG, date = run?.finished_at ?? null }) {
   const p = [];
   p.push(`<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">`);
   const ids = sheetIds(a);
@@ -1312,8 +1320,12 @@ function renderSvg({ f, g, placed }, { a, size, select, responses, run, shareUrl
   // told the same thing about what it measures. The finding that used to sit here belongs on the card; this page
   // is the replies themselves, and it says so.
   // Tracked the way the cards track theirs — 2px at 26px — scaled with the size rather than fixed at 2px.
-  p.push(`<text x="${g.pad}" y="${y.toFixed(1)}" font-family="${MONO}" font-size="${headFont.toFixed(1)}" font-weight="700" letter-spacing="${(headFont * 2 / 26).toFixed(1)}" fill="${COLORS.muted}">${esc(`${brandLine(a)} · ${kind}`)}</text>`);
+  // The same top strip as the cards: the brand and what was measured on the left, the month on the right.
+  const tracking = (headFont * 2 / 26).toFixed(1);
+  p.push(`<text x="${g.pad}" y="${y.toFixed(1)}" font-family="${MONO}" font-size="${headFont.toFixed(1)}" font-weight="700" letter-spacing="${tracking}" fill="${COLORS.muted}">${esc(brandLine(a))}</text>`);
+  p.push(`<text x="${size - g.pad}" y="${y.toFixed(1)}" text-anchor="end" font-family="${MONO}" font-size="${headFont.toFixed(1)}" letter-spacing="${tracking}" fill="${a.mock ? COLORS.accent : COLORS.muted}">${esc(`${monthStamp(date)}${a.mock ? ' · MOCK DATA' : ''}`)}</text>`);
   const state = { inSlot: false };
+  y += head.gapAbove || 0;
   for (const line of block.lines) {
     y += block.size * TITLE_LEADING;
     p.push(titleLine(line, g.pad, y, block.size, state));

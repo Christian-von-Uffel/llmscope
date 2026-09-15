@@ -120,7 +120,7 @@ function parseEvalRef(input) {
  * `llmscope serve` — the error says so rather than pretending the id was malformed.
  */
 async function resolveEvalRef(ref) {
-  if (!ref) return { error: 'That is not an eval ID or an llmscope link. An ID is six characters, like D5a3G9.' };
+  if (!ref) return { error: 'That is not an eval ID or an llmscope link. An ID is six characters, like PJPlrU.' };
   // A share link carries the whole spec, so it always resolves — but the id it computes to may be one this
   // browser or this site has already run, and then it has a card to show. Same screen either way.
   if (ref.kind === 'spec') {

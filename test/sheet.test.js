@@ -7,7 +7,7 @@ import { createMockProvider } from '../src/providers/mock.js';
 import { modelPalette, modelColors, contrast, spreadIndex } from '../src/palette.js';
 import { ensureText, measureWidth, font, FONT_METRICS } from '../src/text.js';
 import { COLORS } from '../src/analyze.js';
-import { wrap, readableLines } from '../src/render.js';
+import { wrap, readableLines, monthStamp } from '../src/render.js';
 await ensureText();
 
 const models = ['openai/gpt-6-astra', 'anthropic/claude-fable-5.1', 'google/gemini-3.8-flash', 'x-ai/grok-4.6', 'meta-llama/llama-4-maverick', 'mistralai/mistral-medium-3-5', 'deepseek/deepseek-v4-pro-0813', 'qwen/qwen3.8-max-0902'];
@@ -53,7 +53,7 @@ test('everything lands on one image, measured exactly; fewer replies grow the te
   assert.equal(all.replies, 80);
   assert.equal(all.exact, true);
   assert.ok(all.font >= 6 && all.font <= 90, String(all.font));
-  assert.ok(all.svg.includes('llmscope · refusal rate · responses') && !all.svg.includes('│') && !all.svg.includes('page '));
+  assert.ok(all.svg.includes('llmscope · refusal rate<') && all.svg.includes(`>${monthStamp(run.finished_at)}`) && !all.svg.includes('│') && !all.svg.includes('page '));
   // Every reply is its own line and opens with whose it is: the provider's mark, the model, then the reply.
   // Sorted by model instead, the model heads its batch once and the replies under it open with the wording.
   // (The link plumbing around a name is not drawn text, so it is measured out.)
@@ -244,6 +244,22 @@ test('the two hardest hues to tell apart go to the two models furthest apart in 
   assert.deepEqual(legend, order.map((m) => map[m]), 'the legend reads in that order');
 });
 
+test('a prompt grown to lift a page keeps at least 8 words a line', async () => {
+  const { renderRefusalSheet } = await import('../src/sheet.js');
+  const { mostLines, MEASURE } = await import('../src/render.js');
+  const fs = await import('node:fs/promises');
+  // The sample run's prompt is 26 words: grown for its headings it once took 5 lines of 5 words each.
+  const sample = JSON.parse(await fs.readFile(new URL('../assets/samples/runs/D5a3G9.results.json', import.meta.url), 'utf8'));
+  const size = 1400;
+  const pad = Math.round(size * 0.03);
+  const { svg } = renderRefusalSheet(sample, { size });
+  const lines = [...svg.matchAll(new RegExp(`<text x="${pad}" y="[\\d.]+" font-family="[^"]+" font-size="\\d+" font-weight="700" fill="#(?:f3f4f6|ffd166)"`, 'g'))].length;
+  const quoted = `“${analyze(sample).title.prompt}”`;
+  const words = quoted.split(/\s+/).length;
+  assert.ok(lines <= mostLines(quoted), `${lines} lines for ${words} words`);
+  assert.ok(words / lines >= MEASURE.minWords, `${(words / lines).toFixed(1)} words a line`);
+});
+
 test('the prompt, the legend names and the URL grow into their space; the text reaches the bottom of every column', () => {
   const size = 4096;
   const { svg, fill } = renderResponseSheet(run, { size });
@@ -259,7 +275,8 @@ test('the prompt, the legend names and the URL grow into their space; the text r
   const widest = Math.max(...wrap(quoted, title[0], width, Infinity).map((l) => measureWidth(l, font(title[0], { bold: true }))));
   assert.ok(widest <= width && widest >= width * 0.97, `widest title line ${widest.toFixed(0)}px of ${width}px`);
   // The URL is one column wide: the width of a column in the four-column layout.
-  const [, urlSize, urlText] = /text-anchor="end" font-family="'DejaVu Sans Mono'[^"]*" font-size="([\d.]+)"[^>]*>([^<]+)</.exec(svg);
+  // The last right-set mono line: the first is the month stamp at the top.
+  const [, urlSize, urlText] = [...svg.matchAll(/text-anchor="end" font-family="'DejaVu Sans Mono'[^"]*" font-size="([\d.]+)"[^>]*>([^<]+)</g)].at(-1);
   const urlW = measureWidth(urlText, font(Number(urlSize), { mono: true }));
   assert.ok(urlW <= quarterWidth(size) && urlW >= quarterWidth(size) * 0.95, `url ${urlW.toFixed(0)}px of ${quarterWidth(size).toFixed(0)}px`);
   // Model names in the legend grow past the base legend size to fill the width beside the URL.

@@ -1,5 +1,6 @@
 // Share card: one finding in words, one number per cell, nothing that dies at thumbnail size.
-import { COLORS, keywordPhrase, noKeywordsYet, METRIC_LABEL, brandLine, countedLine, runsLine } from './analyze.js';
+import { contrast } from './a11y.js';
+import { COLORS, CELL_GROUND, keywordPhrase, noKeywordsYet, METRIC_LABEL, brandLine, countedLine, runsLine } from './analyze.js';
 import { esc, textWidth, wrap, fit, shortModel, clamp, fillLastLine, promptBlock, TITLE, GROW_MAX, monthStamp } from './render.js';
 import { pinTextWidths, SANS, MONO } from './text.js';
 import { logoFor } from './logos.js';
@@ -42,6 +43,17 @@ export function findingFor(a) {
   if (p === 'keyword') return { headline: `${rows.filter((r) => r.matchedAny).length} of ${n} models ${kwPhrase} in their reply`, direction: null };
   if (p === 'sentiment') return { headline: `${rows.filter((r) => r.cells[0]?.sentiment_mean < 0).length} of ${n} models replied negatively`, direction: null };
   return { headline: `${rows.filter((r) => r.refusedAny).length} of ${n} models refused this prompt`, direction: null };
+}
+
+/**
+ * White or the page's near-black, whichever reads better on the fill under the middle of the cell, where the label
+ * sits. The sentiment inks are light at full strength and dark faded into the cell, so neither ink serves both.
+ */
+export function labelInk(cell) {
+  let at = 0;
+  const seg = cell.segments.find((s) => (at += s.count) > cell.n / 2);
+  const ground = seg ? seg.color : CELL_GROUND;
+  return contrast('#ffffff', ground) >= contrast(COLORS.bg, ground) ? '#fff' : COLORS.bg;
 }
 
 function cellWords(cell, primary) {
@@ -188,7 +200,7 @@ export function renderShareCard(a, { width = 1600, height = 1600, names = {}, ur
       }
       const label = cellWords(cell, a.spec.primary);
       const ls = fit(label, clamp(24, rowH * 0.5, 64), cellW - 32, true, 16);
-      text(cx + cellW / 2, ry + rowH / 2 + ls / 3, label, { size: ls, weight: 700, fill: '#fff', anchor: 'middle' });
+      text(cx + cellW / 2, ry + rowH / 2 + ls / 3, label, { size: ls, weight: 700, fill: a.spec.primary === 'sentiment' ? labelInk(cell) : '#fff', anchor: 'middle' });
     });
   });
 

@@ -59,6 +59,16 @@ export function readableLines(text) {
 }
 
 /**
+ * Most lines the text may take and still carry MEASURE.minWords a line. A title set larger than its measure asks
+ * for buys the size with lines, and past this many it is no longer a measure but a column of stubs — so however
+ * much room a page has to give the prompt, it takes no more lines than this. Never fewer than readableLines.
+ */
+export function mostLines(text) {
+  const words = String(text ?? '').trim().split(/\s+/).filter(Boolean).length;
+  return Math.max(readableLines(text), Math.floor(words / MEASURE.minWords));
+}
+
+/**
  * Largest size in [minSize, maxSize] at which every paragraph wraps to no more than its own maxLines and the
  * whole block — the paragraphs plus a blockGap between them — fits maxHeight. Every paragraph is set at the
  * same size, so a card quoting several prompts never makes one of them look like the one that mattered.

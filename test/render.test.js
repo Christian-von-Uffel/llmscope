@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { runEval } from '../src/engine.js';
 import { analyze } from '../src/analyze.js';
-import { fitTitleBlock, readableLines, wrap, textWidth, clamp, MEASURE, TITLE, GROW_MAX } from '../src/render.js';
+import { fitTitleBlock, readableLines, mostLines, wrap, textWidth, clamp, MEASURE, TITLE, GROW_MAX } from '../src/render.js';
 import { renderShareCard, SHARE_TITLE_SIZE } from '../src/render-share.js';
 import { createMockProvider } from '../src/providers/mock.js';
 import { ensureText } from '../src/text.js';
@@ -36,6 +36,16 @@ test('readableLines takes the fewest lines that keep a title at or under 12 word
   assert.equal(readableLines(Array(24).fill('word').join(' ')), 2);
   assert.equal(readableLines(Array(25).fill('word').join(' ')), 3);
   assert.equal(readableLines(''), 1);
+});
+
+test('mostLines is the most lines that keep a title at or over 8 words, and never fewer than its measure', () => {
+  assert.equal(MEASURE.minWords, 8);
+  assert.equal(mostLines('one two three'), 1);
+  assert.equal(mostLines(Array(16).fill('word').join(' ')), 2);
+  assert.equal(mostLines(Array(23).fill('word').join(' ')), 2);
+  assert.equal(mostLines(Array(24).fill('word').join(' ')), 3);
+  assert.equal(mostLines(Array(26).fill('word').join(' ')), 3, 'a 26-word prompt may take 3 lines, not 4 or 5');
+  assert.equal(mostLines(Array(13).fill('word').join(' ')), 2, 'at least what the measure asks for');
 });
 
 test('a title is sized to fill the lines its measure asks for, and no more', () => {

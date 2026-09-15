@@ -23,7 +23,7 @@ test('one-line run with flags, mock provider, no TTY: writes results, svg, png a
   assert.equal(results.results.length, 8);
   assert.ok((await fs.readFile(path.join(tmp, 'out', `${id}.svg`), 'utf8')).startsWith('<svg'));
   const sheet = await fs.readFile(path.join(tmp, 'out', `${id}.responses.svg`), 'utf8');
-  assert.ok(sheet.includes('llmscope · refusal rate · responses') && sheet.includes('8 replies'), 'every run also writes the responses sheet');
+  assert.ok(sheet.includes('llmscope · refusal rate<') && sheet.includes('8 replies'), 'every run also writes the responses sheet');
   assert.match(stdout, /responses: .*\.responses\.svg/);
   const ends = await fs.readFile(path.join(tmp, 'out', `${id}.ends.svg`), 'utf8');
   assert.ok(ends.includes('showing the first and last sentence of each reply'), 'and the first and last sentences of every reply, on an image of its own');
@@ -268,7 +268,7 @@ test('sentences: a fourth image, every sentence a marked word turned up in, batc
     assert.match(stdout, row, `${group} keeps its place on the page:\n${stdout}`);
   }
   const svg = await fs.readFile(page, 'utf8');
-  assert.ok(svg.includes('llmscope · keyword matching · sentences'), 'the page says which of the images it is');
+  assert.ok(svg.includes('llmscope · keyword matching<'), 'the page is headed like the cards: brand and measure');
   assert.ok(svg.includes('in a batch per wording, every model together'), 'and the legend says how it is batched');
   // Every reply drawn here matched a keyword, so the outcome key would say one thing four times: it is dropped.
   for (const label of ['refused', 'answered', 'included keywords', 'error or cut off']) assert.ok(!svg.includes(`>${label}<`), `“${label}” is keyed on the responses sheet, not here`);
