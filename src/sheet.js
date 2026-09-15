@@ -396,27 +396,35 @@ export function estimateCapacity({ size = 4096, font: f = 28, columns = null } =
 // ---------- header and legend (sized by the image, not by the body text) ----------
 /** The leading the prompt is set with, and so the height of one of its lines. */
 const TITLE_LEADING = 1.12;
+/** The most of the page the prompt may take: set to its own measure, and grown to buy the sentences page its room. */
+const HEADER_SHARE = 0.16;
+const HEADER_GROWN_SHARE = 0.3;
 
 /** The brand line's size on a sheet: the share of the image the cards give theirs (26px on 1600), so the three images read as one set. */
 export const BRAND_SCALE = 1 / 60;
 
-function header(a, size, { extraLines = 0, gapLines = 0 } = {}) {
+/** The gap the cards leave between the brand line and the prompt (40px on 1600), as a share of the image. */
+const CARD_BRAND_GAP = 40 / 1600;
+
+function header(a, size, { extraLines = 0, gapLines = 0, gapAbove = 0 } = {}) {
   const pad = Math.round(size * 0.03);
   // Sized to the image like the cards' brand line, not to the body text: at 1/150 it was a footnote on a 4096px page.
   const headFont = size * BRAND_SCALE;
   const quoted = a.title.prompt ? `“${a.title.prompt}”` : '';
   const width = size - pad * 2;
-  const maxHeight = size * 0.16;
   // The prompt's measure decides how many lines it takes (8-12 words each); pretext then sizes it to fill them.
   // `extraLines` lets it take a narrower measure than that and so be set larger — which the sentences page asks
-  // for when its own text would otherwise come up level with the question.
+  // for when its own text would otherwise come up level with the question. A prompt left to its measure takes
+  // at most a sixth of the page; one asked to grow may take up to HEADER_GROWN_SHARE of it, because the body
+  // under it is capped against its size, and a prompt held at a sixth left the rest of a short page blank.
+  const maxHeight = size * (extraLines ? HEADER_GROWN_SHARE : HEADER_SHARE);
   const block = fitTitleBlock(quoted, width, { maxHeight, maxSize: (size / 45) * GROW_MAX, minSize: size / 150, maxLines: readableLines(quoted) + extraLines });
   // Enough to clear the descenders of a title that may be much larger than headFont, and never less than
   // `gapLines` lines of the prompt's own leading: the question and the page under it are two things, and a page
   // that starts a line after the prompt ends reads as its continuation.
   const titleGap = Math.max(headFont * 1.8 + block.size * 0.15, block.size * TITLE_LEADING * gapLines);
-  const height = Math.round(headFont + block.lines.length * block.size * TITLE_LEADING + titleGap);
-  return { headFont, block, titleGap, headerH: height };
+  const height = Math.round(headFont + gapAbove + block.lines.length * block.size * TITLE_LEADING + titleGap);
+  return { headFont, block, titleGap, gapAbove, headerH: height };
 }
 
 /** Width of one column when the image has four (the 4K layout): the URL in the legend is exactly this wide. */
@@ -1272,17 +1280,12 @@ export function renderRefusalSheet(run, { size = 4096, maxFont = null, minFont =
     { size, headerH: h.headerH, legendH: leg.height, columns, minFont, maxFont: cap },
   );
   const gapLines = layout === 'flow' ? 0 : 1;
-  let head = header(a, size, { gapLines });
+  // This page sits beside the refusal-rate card, so its prompt is set the way the card sets it: to its own measure
+  // and never grown to more lines, with the card's gap between the brand line and the question. The body is still
+  // capped against the prompt's size, so a wording cannot come up level with it.
+  const head = header(a, size, { gapLines, gapAbove: size * CARD_BRAND_GAP });
   let cap = maxFont || null;
-  if (heading > 1 || name > 1) {
-    const want = fitWith(head, cap).f / BODY_OF_PROMPT;
-    for (let extra = 1; extra <= 4 && head.block.size < want; extra++) {
-      const grown = header(a, size, { extraLines: extra, gapLines });
-      if (grown.block.size <= head.block.size) break;
-      head = grown;
-    }
-    cap = Math.min(cap || Infinity, head.block.size * BODY_OF_PROMPT);
-  }
+  if (heading > 1 || name > 1) cap = Math.min(cap || Infinity, head.block.size * BODY_OF_PROMPT);
   const best = fitWith(head, cap);
   const refusers = new Set(found.lines.map((l) => l.response.model)).size;
   const metaParts = [
@@ -1314,6 +1317,7 @@ function renderSvg({ f, g, placed }, { a, size, select, responses, run, shareUrl
   // Tracked the way the cards track theirs — 2px at 26px — scaled with the size rather than fixed at 2px.
   p.push(`<text x="${g.pad}" y="${y.toFixed(1)}" font-family="${MONO}" font-size="${headFont.toFixed(1)}" font-weight="700" letter-spacing="${(headFont * 2 / 26).toFixed(1)}" fill="${COLORS.muted}">${esc(`${brandLine(a)} · ${kind}`)}</text>`);
   const state = { inSlot: false };
+  y += head.gapAbove || 0;
   for (const line of block.lines) {
     y += block.size * TITLE_LEADING;
     p.push(titleLine(line, g.pad, y, block.size, state));
