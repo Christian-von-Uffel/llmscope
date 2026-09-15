@@ -72,7 +72,7 @@ export const IMAGES = [
     kind: 'refusals', suffix: '.refusals', size: 4096, when: 'always', tab: 'refusal', view: 'Sentences', titled: false,
     hint: 'every refused reply cut to the sentence it declined in, under the wording that drew it, with the refusing phrase marked',
     draw: (run, o) => {
-      const page = renderRefusalSheet(run, { size: o.size, maxFont: o.maxFont, columns: o.columns, select: o.select, url: o.url, sort: o.sort, mark: o.mark, layout: o.layout, voice: o.voice, clean: o.clean });
+      const page = renderRefusalSheet(run, { date: o.date, size: o.size, maxFont: o.maxFont, columns: o.columns, select: o.select, url: o.url, sort: o.sort, mark: o.mark, layout: o.layout, voice: o.voice, clean: o.clean });
       // A page of wordings nobody declined is not an answer: say so instead.
       return page.refused ? page : { ...page, svg: '', empty: `nothing in this run was refused${o.select === 'all' ? '' : ` among ${SELECTIONS[o.select]}`}` };
     },
@@ -94,7 +94,7 @@ export const IMAGES = [
     hint: 'every sentence a marked word turned up in, under the wording that produced it — needs words to mark',
     draw: (run, o) => {
       if (!o.highlight.length) return { svg: '', empty: 'this run marks no words' };
-      const page = renderSentenceSheet(run, { size: o.size, maxFont: o.maxFont, columns: o.columns, select: o.select, url: o.url, highlight: o.highlight, sort: o.sort, mark: o.mark, layout: o.layout, voice: o.voice, clean: o.clean });
+      const page = renderSentenceSheet(run, { date: o.date, size: o.size, maxFont: o.maxFont, columns: o.columns, select: o.select, url: o.url, highlight: o.highlight, sort: o.sort, mark: o.mark, layout: o.layout, voice: o.voice, clean: o.clean });
       // A page of headings over nothing is not an answer: say which words came up short instead.
       return page.matches ? page : { ...page, svg: '', empty: `nothing in this run matches ${o.highlight.join(', ')}${o.select === 'all' ? '' : ` among ${SELECTIONS[o.select]}`}` };
     },
@@ -102,12 +102,12 @@ export const IMAGES = [
   {
     kind: 'responses', suffix: '.responses', size: 4096, when: 'always', tab: 'responses', view: null, titled: false,
     hint: "every reply of the run on one sheet, in its model's colour, with the marked words highlighted",
-    draw: (run, o) => renderResponseSheet(run, { size: o.size, maxFont: o.maxFont, columns: o.columns, select: o.select, url: o.url, highlight: o.highlight, excerpt: o.excerpt, sort: o.sort }),
+    draw: (run, o) => renderResponseSheet(run, { date: o.date, size: o.size, maxFont: o.maxFont, columns: o.columns, select: o.select, url: o.url, highlight: o.highlight, excerpt: o.excerpt, sort: o.sort }),
   },
   {
     kind: 'ends', suffix: '.ends', size: 4096, when: 'always', tab: 'responses', view: null, titled: false,
     hint: 'the first and last sentence of every reply: how each model opens and where it lands, side by side',
-    draw: (run, o) => renderResponseSheet(run, { size: o.size, maxFont: o.maxFont, columns: o.columns, select: o.select, url: o.url, highlight: o.highlight, excerpt: 'ends', sort: o.sort }),
+    draw: (run, o) => renderResponseSheet(run, { date: o.date, size: o.size, maxFont: o.maxFont, columns: o.columns, select: o.select, url: o.url, highlight: o.highlight, excerpt: 'ends', sort: o.sort }),
   },
 ];
 

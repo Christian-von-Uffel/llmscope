@@ -6,6 +6,7 @@ import { renderSentenceSheet, renderResponseSheet, renderRefusalSheet, refusalCo
 import { findKeywordSpans } from '../src/checks/keywords.js';
 import { createMockProvider } from '../src/providers/mock.js';
 import { analyze, COLORS } from '../src/analyze.js';
+import { mostLines } from '../src/render.js';
 import { modelColors } from '../src/palette.js';
 import { ensureText } from '../src/text.js';
 await ensureText();
@@ -198,7 +199,7 @@ test('the page draws every gathered sentence in full, under its wording, with th
     }
   }
   for (const m of models) assert.ok(text.includes(m.split('/').pop()), `${m} is named where its sentences start`);
-  assert.ok(page.svg.includes('llmscope · keyword matching · sentences'), 'the page says which of the images it is');
+  assert.ok(page.svg.includes('llmscope · keyword matching<'), 'the page is headed like the cards: brand and measure');
   assert.ok(page.svg.includes(`${page.matches} keyword matches in ${page.sentences} sentences`), 'and counts the matches it is made of');
   // A group heading is a jump into its own batch, the way the responses sheet heads a group batch.
   for (const v of analysis.variants) assert.ok(page.svg.includes(`<view id="`) && page.svg.includes(v.label));
@@ -310,7 +311,7 @@ const sizesOf = (svg) => [...svg.matchAll(/<text[^>]*font-size="([\d.]+)"[^>]*>(
 test('the page is built on a scale: the prompt, then the wording, then the model, then the sentences', () => {
   const page = renderSentenceSheet(run, { size: 4096 });
   const drawn = sizesOf(page.svg);
-  const prompt = drawn[1].size; // after the brand line
+  const prompt = drawn[2].size; // after the brand line and the month stamp
   const heading = drawn.find((d) => d.text === page.batches[0].label).size;
   const name = drawn.find((d) => d.text.includes(page.batches[0].split[0].label)).size;
   assert.ok(heading > name, `the wording outranks the model name (${heading} over ${name})`);
@@ -329,13 +330,17 @@ test('flattened, the page sets heading, name and sentence at one size, as the re
   assert.ok(page.font > renderSentenceSheet(run, { size: 4096 }).font, 'a page with no scale to buy room for holds bigger text');
 });
 
-test('the prompt is grown to buy the scale its room, and keeps a line of its own clear of the page', () => {
+test('the prompt grows for the scale only while its lines keep 8 words, and keeps a line of its own clear of the page', () => {
   const page = renderSentenceSheet(run, { size: 4096 });
   const flat = renderSentenceSheet(run, { size: 4096, heading: 1, name: 1, layout: 'flow' });
   const drawn = [...page.svg.matchAll(/<text[^>]*y="([\d.]+)"[^>]*font-size="([\d.]+)"[^>]*>([^<]*)</g)]
     .map((m) => ({ y: Number(m[1]), size: Number(m[2]), text: m[3] }));
   const prompt = Math.max(...drawn.map((d) => d.size));
-  assert.ok(prompt > Math.max(...[...flat.svg.matchAll(/font-size="([\d.]+)"/g)].map((m) => Number(m[1]))), 'the prompt is grown for it');
+  assert.ok(prompt >= Math.max(...[...flat.svg.matchAll(/font-size="([\d.]+)"/g)].map((m) => Number(m[1]))), 'the scale never shrinks the prompt');
+  // Grown, a prompt trades size for lines; it stops where a line would carry fewer than 8 words.
+  const quoted = `“${analyze(run).title.prompt}”`;
+  const promptLines = new Set(drawn.filter((d) => d.size === prompt).map((d) => d.y)).size;
+  assert.ok(promptLines <= mostLines(quoted), `${promptLines} lines, at most ${mostLines(quoted)} for ${quoted.split(/\s+/).length} words`);
   const lastPrompt = Math.max(...drawn.filter((d) => d.size === prompt).map((d) => d.y));
   const firstBody = Math.min(...drawn.filter((d) => d.size !== prompt && d.y > lastPrompt).map((d) => d.y));
   // One line of the prompt's own leading, so the page under it is a second thing rather than its continuation.
@@ -343,8 +348,9 @@ test('the prompt is grown to buy the scale its room, and keeps a line of its own
 });
 
 test('more sentences mean smaller text, and nothing is paginated or trimmed away to make them fit', () => {
-  const few = renderSentenceSheet(run, { size: 4096, select: 'per-cell' });
-  const all = renderSentenceSheet(run, { size: 4096 });
+  // Without the scale, so the body is sized by the page alone and not held under the prompt's cap.
+  const few = renderSentenceSheet(run, { size: 4096, select: 'per-cell', heading: 1, name: 1 });
+  const all = renderSentenceSheet(run, { size: 4096, heading: 1, name: 1 });
   assert.ok(few.sentences < all.sentences);
   assert.ok(few.font > all.font, `fewer sentences → larger text (${few.font} vs ${all.font})`);
   const long = { ...run, results: run.results.map((r, i) => ({ ...r, run: i, text: `${'filler word '.repeat(120)} A suspicious figure waited.` })) };
@@ -408,7 +414,7 @@ test('the refusals page: every refused reply under its wording, the refusing phr
   assert.ok(page.svg.includes('4 of 4 replies refused · 2 models'));
   assert.ok(page.svg.includes(`fill="${REFUSAL_MARK}"`), 'the phrase is marked in the refusal red, not the keyword amber');
   assert.ok(!page.svg.includes(MARK_WASH), 'no amber wash on a page with no keywords');
-  assert.ok(page.svg.includes('· refusals<'));
+  assert.ok(!page.svg.includes('· refusals<'));
   assert.ok(page.svg.includes('×2'), 'each model counts its refusals');
   assert.ok(page.svg.includes(refusalNote().split(' · ')[0].replace('highlighted = ', '')), 'the note says what the mark is');
   // The batching follows the sentences page: one model straight through, every wording it was given.
