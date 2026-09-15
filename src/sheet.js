@@ -22,7 +22,7 @@ import { sentences, sentenceBatches, refusalBatches, SENTENCE_SORTS } from './se
 import { refusalSpans } from './checks/refusal.js';
 import { esc, wrap, fitTitleBlock, readableLines, mostLines, shortModel, GROW_MAX, titleLine, monthStamp } from './render.js';
 import { logoBody, providerOf } from './logos.js';
-import { modelColors, contrast } from './palette.js';
+import { modelColors, contrast, mix } from './palette.js';
 import { font, measureWidth, pinTextWidths, textReady, SANS, MONO, FONT_METRICS } from './text.js';
 
 
@@ -127,11 +127,6 @@ const HEADING_OF_PROMPT = 0.62;
 /** And the name stays under the heading, however the two are arrived at. */
 const NAME_OF_HEADING = 0.85;
 const TINT_OPACITY = 0.3;
-/** `hex` mixed `amount` of the way into `onto`, as a solid colour. A wash drawn as one fill rather than as a layer. */
-function mix(hex, onto, amount) {
-  const ch = (h, i) => parseInt(h.slice(1 + i * 2, 3 + i * 2), 16);
-  return '#' + [0, 1, 2].map((i) => Math.round(ch(onto, i) + (ch(hex, i) - ch(onto, i)) * amount).toString(16).padStart(2, '0')).join('');
-}
 
 export const MARK_BG = COLORS.accent;
 export const MARK_TEXT = COLORS.bg;

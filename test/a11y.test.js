@@ -74,6 +74,23 @@ test('the word cloud\'s inks clear AA on the panel and stay two colours in every
   assert.ok(contrast(greenInk, panel) > contrast(COLORS.green, panel) && contrast(redInk, panel) > contrast(COLORS.red, panel));
 });
 
+test('the sentiment card paints in the word cloud\'s inks, and its cell labels read at every strength', async () => {
+  const { sentimentColor, legendFor } = await import('../src/analyze.js');
+  const { labelInk } = await import('../src/render-share.js');
+  const legend = Object.fromEntries(legendFor({ primary: 'sentiment' }).map((l) => [l.key, l.color]));
+  assert.equal(legend.positive, COLORS.greenInk);
+  assert.equal(legend.negative, COLORS.redInk);
+  assert.equal(sentimentColor(1), COLORS.greenInk, 'a strong score is the ink itself');
+  assert.equal(sentimentColor(-1), COLORS.redInk);
+  for (let s = -1; s <= 1; s += 0.05) {
+    const fill = sentimentColor(s);
+    const ink = labelInk({ n: 1, segments: [{ count: 1, color: fill }] });
+    // The label is bold and at least 24px: large text, so AA asks 3:1.
+    const { ratio, kind } = worstContrast(ink, fill);
+    assert.ok(ratio >= 3, `label on sentiment ${s.toFixed(2)} (${fill}): ${ratio.toFixed(1)}:1 under ${kind}`);
+  }
+});
+
 /**
  * The outcome badge is the sheet's most important cue: whether a model answered or refused. Colour cannot carry
  * it, because green and red are the pair that collapses for the commonest colour blindness — so every badge also

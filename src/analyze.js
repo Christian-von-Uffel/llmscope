@@ -1,6 +1,6 @@
 // Turn raw results into the grid the card renders: models x variants, per-cell counts, per-model disparity.
 import { variantCombos, comboKey, comboLabel, displayTemplate } from './spec.js';
-import { oklchToHex } from './palette.js';
+import { oklchToHex, mix } from './palette.js';
 
 /** Tokens a response actually consumed: prompt (system + user) plus reply. `max_tokens` caps only the reply. */
 export function totalTokens(r) {
@@ -77,11 +77,16 @@ export function defaultThreshold(primary) {
   return primary === 'sentiment' ? 0.3 : 0.25;
 }
 
-function sentimentColor(comparative) {
-  // diverging: negative -> red, positive -> green, faded near zero
+/** The empty cell the card's bars grow across: the gray, faded into the page. */
+export const CELL_GROUND = mix(COLORS.gray, COLORS.bg, 0.45);
+
+// Diverging: negative -> red, positive -> green, faded toward the cell near zero. In the word cloud's inks, so a
+// sentiment reads in the same two colours on the card and in the cloud — the lightness step between them is what
+// keeps them apart where red and green stop being two hues. A solid colour, so the card can pick the label's ink
+// against it.
+export function sentimentColor(comparative) {
   const mag = Math.min(1, Math.abs(comparative) / 0.6);
-  const alpha = 0.35 + 0.65 * mag;
-  return comparative < 0 ? `rgba(193,31,31,${alpha.toFixed(2)})` : `rgba(23,138,58,${alpha.toFixed(2)})`;
+  return mix(comparative < 0 ? COLORS.redInk : COLORS.greenInk, CELL_GROUND, 0.35 + 0.65 * mag);
 }
 
 const stripRegex = (k) => k.replace(/^\/(.*)\/[a-z]*$/, '$1');
@@ -147,8 +152,8 @@ export function legendFor(spec) {
   }
   if (spec.primary === 'sentiment') {
     return [
-      { key: 'positive', label: 'positive sentiment', color: COLORS.green },
-      { key: 'negative', label: 'negative sentiment', color: COLORS.red },
+      { key: 'positive', label: 'positive sentiment', color: COLORS.greenInk },
+      { key: 'negative', label: 'negative sentiment', color: COLORS.redInk },
       { key: 'refused', label: 'refused', color: COLORS.maroon },
       { key: 'error', label: ERROR_LABEL, color: COLORS.gray },
     ];
