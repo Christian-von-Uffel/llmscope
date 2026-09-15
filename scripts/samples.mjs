@@ -3,7 +3,9 @@
 // Read by scripts/build-samples.mjs, which writes them, and by test/samples.test.js, which fails when a committed
 // sample no longer matches what the renderers draw — the check that keeps the landing page from advertising an
 // image the tool no longer makes. The runs live beside the images rather than in out/, which is not committed, so
-// anyone with the repository can redraw them and the test can hold them to it.
+// anyone with the repository can redraw them and the test can hold them to it. D5a3G9, the run the first samples
+// were drawn from, stays there although nothing is drawn from it now: test/api.test.js and test/cli.test.js load
+// it as a saved run.
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -22,21 +24,21 @@ export const PNG_WIDTH = 1200;
 export const pngName = (file) => file.replace(/\.svg$/, '.png');
 
 // Each sample answers a different question, so they come from different runs rather than views of one: a
-// refusal card that splits by identity, the word cloud of that same run — the answer that the refusal grid
-// no longer gives when nothing is refused — a sheet of replies where the marks actually land, the ends of
-// every reply in a run with several wordings and enough models for the sheet to read across as well as down,
-// and the keyword card of a run where two models reached for a word on one wording and not the others. Every
-// one is drawn through the catalogue, at the defaults a run is drawn with, except where a sample says
-// otherwise: no display names, so the samples need no catalogue fetch.
+// refusal card where the declines fall on two of four wordings and come from two labs' models, the refusals of a
+// run where every model declined one wording in words of its own, the word cloud of a run nobody refused — the
+// answer the refusal grid no longer gives when nothing is refused — a sheet of replies where the marks actually
+// land, the ends of every reply in a run with several wordings and enough models for the sheet to read across as
+// well as down, and the keyword card of a run where two models reached for a word on one wording and not the
+// others. Every one is drawn through the catalogue, at the defaults a run is drawn with, except where a sample
+// says otherwise: no display names, so the samples need no catalogue fetch.
 export const SAMPLES = [
-  // No title given, so the sample is the card a run draws by default: the prompt at the head, no finding stated.
-  { file: 'card.svg', run: 'D5a3G9', kind: 'card', opts: {} },
-  // The refusals behind that card: which wordings drew a decline, from whom, and in what words.
-  { file: 'refusals.svg', run: 'D5a3G9', kind: 'refusals', opts: { size: 1400 } },
-  // The word cloud of the same run, so the page shows the two images one run leaves side by side. That run was
-  // scored with the built-in list before AFINN-165 became the default, so the sample names the default list
-  // rather than following the run, as `llmscope render D5a3G9 --lexicon afinn` would.
-  { file: 'wordcloud.svg', run: 'D5a3G9', kind: 'wordcloud', opts: { lexicon: 'afinn' } },
+  // No title given, so the card has the prompt at its head rather than the finding the run was saved with.
+  { file: 'card.svg', run: 'PJPlrU', kind: 'card', opts: {} },
+  // Every model declined one wording and they split over the rest: under each wording, who declined and the
+  // sentence they declined in.
+  { file: 'refusals.svg', run: 'qjbzF1', kind: 'refusals', opts: { size: 1400 } },
+  // A run nobody refused, so what tells the wordings apart is the words the replies reached for.
+  { file: 'wordcloud.svg', run: 'cYNnYB', kind: 'wordcloud', opts: {} },
   // Only the replies that matched, cut to the sentences that matched: the marks, where they land.
   { file: 'responses.svg', run: 'dbo50g', kind: 'responses', opts: { size: 1400, select: 'matched', excerpt: 'matches' } },
   // The image every run writes beside the full sheet, as `llmscope sheet <id> --excerpt ends` re-makes it.
