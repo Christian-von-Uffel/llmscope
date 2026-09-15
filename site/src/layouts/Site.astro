@@ -1,7 +1,7 @@
 ---
-// The website, as one document: a landing page, a key prompt, the app, and the screen a shared eval opens on.
+// The website, as one document: a landing page, a key prompt, and the app, which is also where a shared run opens.
 //
-// The stages are one page rather than four so the app is parsed and its model list already loading while
+// The stages are one page rather than three so the app is parsed and its model list already loading while
 // somebody is still reading the hero, and so a reader who has been here before never sees the first two. Every
 // route renders this same layout — `/`, `/new`, and the `/<id>` address every card prints in its footer (and the
 // `/e/<id>` earlier cards printed) — which is why the id is read from the URL in the browser rather than baked
@@ -47,18 +47,18 @@ const ogImage = new URL('/og.png', Astro.site).href;
 <meta name="twitter:image" content={ogImage}>
 
 <script is:inline>
-// Which of the four stages the page opens on, decided before the first paint so a returning reader never sees
+// Which of the three stages the page opens on, decided before the first paint so a returning reader never sees
 // the landing page flash past on the way to the app they already unlocked.
 try {
   var hasKey = !!localStorage.getItem('llmscope:openrouter_key');
   var hasRuns = (localStorage.getItem('llmscope:runs') || '[]').length > 2;
-  // An eval named in the URL is someone else's, whether it came as a spec in the hash or as the /<id> path a
-  // card prints in its footer (or the /e/<id> earlier cards printed). Either way it gets looked at before it is
-  // run, whatever else is stored here. /new is the form, empty, for whoever has a key — and the key page for
-  // whoever has not. Otherwise: a run already done is as good a reason to skip the pitch as a saved key.
+  // An eval named in the URL, whether as a spec in the hash or as the /<id> path a card prints in its footer (or
+  // the /e/<id> earlier cards printed), opens in the app, key or no key: its images and replies are there to be
+  // read, and a key is asked for only by Run. /new is the form, empty, for whoever has a key — and the key page
+  // for whoever has not. Otherwise: a run already done is as good a reason to skip the pitch as a saved key.
   var hasSpec = location.hash.indexOf('spec=') >= 0 || /^\/(e\/)?[A-Za-z0-9]{6}$/.test(location.pathname);
   var isNew = location.pathname === '/new';
-  document.documentElement.dataset.stage = hasSpec ? 'resolved' : isNew ? (hasKey ? 'app' : 'key') : hasKey || hasRuns ? 'app' : 'landing';
+  document.documentElement.dataset.stage = hasSpec ? 'app' : isNew ? (hasKey ? 'app' : 'key') : hasKey || hasRuns ? 'app' : 'landing';
 } catch (e) {}
 </script>
 </head>
@@ -157,37 +157,37 @@ try {
   </section>
 
   <section class="band alt" id="output">
-    <h2 class="band-title">Useful bias insights at a glance</h2>
-    <p class="band-lede">See which models exhibit bias, and where. Every run draws its results as images you can read in a second and post as they stand — the layouts are fixed, so two runs always read against each other — and keeps every reply behind them for you to search and export. Each image below links to the eval it was drawn from: open it to run the same eval on your own key, or change something first and run your own.</p>
+    <h2 class="band-title">Useful insights at a glance</h2>
+    <p class="band-lede">See which models exhibit bias, and where. Every run draws its results as images you can read in a second and post as they stand — the layouts are fixed, so two runs always read against each other — and keeps every reply behind them for you to search and export. Click any image below to open the run it was drawn from: page through its other images, read every reply behind them, and run the same eval on your own key when you want to.</p>
     <!-- Real output from real runs, shown as PNGs set in the fonts they were measured with: see PNG_WIDTH in
-         scripts/samples.mjs for why an <img> of the SVG came out with stretched text. Each links to the eval it
-         was drawn from by the eval's id, which the build ships from evals/, rather than by the run's id its footer
-         prints, which answers only where the registry does; test/samples.test.js holds these ids to the runs in
-         scripts/samples.mjs. -->
+         scripts/samples.mjs for why an <img> of the SVG came out with stretched text. Each links to the run it
+         was drawn from, open on that image: /<run id>?image=<kind>, the kind a row of src/images.js. The runs
+         answer on any host, registry or none, because the build ships them from assets/samples/runs/;
+         test/samples.test.js holds these links to SAMPLES in scripts/samples.mjs. -->
     <div class="shots">
       <figure>
-        <a href="/samples/card.png" target="_blank" rel="noopener"><img src="/samples/card.png" alt="A refusal-rate card: eight models by four wordings of the same prompt, each cell shaded by how often the model refused."></a>
-        <figcaption><b>Refusal rate.</b> See which models decline, and which wording of the prompt they decline for. <a class="eval-link" href="/a9AeTb">Open eval a9AeTb</a></figcaption>
+        <a href="/PJPlrU?image=card"><img src="/samples/card.png" alt="A refusal-rate card: eight models by four wordings of the same prompt, each cell shaded by how often the model refused."></a>
+        <figcaption><b>Refusal rate.</b> See which models decline, and which wording of the prompt they decline for. <a class="eval-link" href="/PJPlrU?image=card">See it in action</a></figcaption>
       </figure>
       <figure>
-        <a href="/samples/refusals.png" target="_blank" rel="noopener"><img src="/samples/refusals.png" alt="A refusals sheet: under each wording of one prompt, the models that declined it and the sentence each declined with, the refusing phrase marked in red."></a>
-        <figcaption><b>Refusals.</b> See how a refusal happens: under each wording, every model that declined and the sentence it declined in, with the phrase that made it a refusal marked. <a class="eval-link" href="/0smwFk">Open eval 0smwFk</a></figcaption>
+        <a href="/qjbzF1?image=refusals"><img src="/samples/refusals.png" alt="A refusals sheet: under each wording of one prompt, the models that declined it and the sentence each declined with, the refusing phrase marked in red."></a>
+        <figcaption><b>Refusals.</b> See how a refusal happens: under each wording, every model that declined and the sentence it declined in, with the phrase that made it a refusal marked. <a class="eval-link" href="/qjbzF1?image=refusals">See it in action</a></figcaption>
       </figure>
       <figure>
-        <a href="/samples/wordcloud.png" target="_blank" rel="noopener"><img src="/samples/wordcloud.png" alt="A word cloud: three wordings of one prompt, each with a cloud of the words the replies were scored on, sized by how many replies used them and coloured green or red by which way they scored."></a>
-        <figcaption><b>Word cloud.</b> See how the answers differ when nothing is refused: the words each wording draws from the models, sized by how many replies used them, green or red by their sentiment. <a class="eval-link" href="/db0R0G">Open eval db0R0G</a></figcaption>
+        <a href="/cYNnYB?image=wordcloud"><img src="/samples/wordcloud.png" alt="A word cloud: three wordings of one prompt, each with a cloud of the words the replies were scored on, sized by how many replies used them and coloured green or red by which way they scored."></a>
+        <figcaption><b>Word cloud.</b> See how the answers differ when nothing is refused: the words each wording draws from the models, sized by how many replies used them, green or red by their sentiment. <a class="eval-link" href="/cYNnYB?image=wordcloud">See it in action</a></figcaption>
       </figure>
       <figure>
-        <a href="/samples/keywords.png" target="_blank" rel="noopener"><img src="/samples/keywords.png" alt="A keyword-matching card: eight models, each with the wording of the prompt that made it reply with a charged word, the word itself, and how many of its responses included it."></a>
-        <figcaption><b>Keyword matching.</b> See where charged words show up: which model reached for them, under which wording, in how many runs. <a class="eval-link" href="/mwbXAp">Open eval mwbXAp</a></figcaption>
+        <a href="/mwbXAp?image=keywords"><img src="/samples/keywords.png" alt="A keyword-matching card: eight models, each with the wording of the prompt that made it reply with a charged word, the word itself, and how many of its responses included it."></a>
+        <figcaption><b>Keyword matching.</b> See where charged words show up: which model reached for them, under which wording, in how many runs. <a class="eval-link" href="/mwbXAp?image=keywords">See it in action</a></figcaption>
       </figure>
       <figure>
-        <a href="/samples/responses.png" target="_blank" rel="noopener"><img src="/samples/responses.png" alt="A responses sheet: every reply that used a marked word, cut to the sentence it landed in, grouped by wording and coloured by model."></a>
-        <figcaption><b>Responses.</b> See how keywords and phrases affect AI responses: the replies behind the numbers, grouped by wording, with the words you marked highlighted where they land. <a class="eval-link" href="/dbo50g">Open eval dbo50g</a></figcaption>
+        <a href="/dbo50g?image=responses&amp;excerpt=matches"><img src="/samples/responses.png" alt="A responses sheet: every reply that used a marked word, cut to the sentence it landed in, grouped by wording and coloured by model."></a>
+        <figcaption><b>Responses.</b> See how keywords and phrases affect AI responses: the replies behind the numbers, grouped by wording, with the words you marked highlighted where they land. <a class="eval-link" href="/dbo50g?image=responses&amp;excerpt=matches">See it in action</a></figcaption>
       </figure>
       <figure>
-        <a href="/samples/ends.png" target="_blank" rel="noopener"><img src="/samples/ends.png" alt="A first-and-last-sentences sheet: how each of seven models opened its reply to three wordings of one prompt and where it landed, refusals marked with a red cross."></a>
-        <figcaption><b>First and last sentences.</b> See the tone of responses at a glance: how each model opens its reply and where it lands, side by side. <a class="eval-link" href="/GK1zvv">Open eval GK1zvv</a></figcaption>
+        <a href="/GK1zvv?image=ends"><img src="/samples/ends.png" alt="A first-and-last-sentences sheet: how each of seven models opened its reply to three wordings of one prompt and where it landed, refusals marked with a red cross."></a>
+        <figcaption><b>First and last sentences.</b> See the tone of responses at a glance: how each model opens its reply and where it lands, side by side. <a class="eval-link" href="/GK1zvv?image=ends">See it in action</a></figcaption>
       </figure>
     </div>
     <div class="extras">
@@ -219,33 +219,6 @@ try {
   </footer>
 </div>
 
-<!-- ==================== AN EVAL, RESOLVED ==================== -->
-<div class="stage stage-resolved">
-  <header class="site-head">
-    <a class="brand" href="#top" data-go="landing"><svg class="scope"><use href="#ico-scope"/></svg><span>llmscope</span></a>
-    <nav class="site-nav">
-      <a class="btn ghost small" href="/new" data-go="new" title="write an eval of your own, on an empty form">New eval</a>
-    </nav>
-  </header>
-  <div class="resolved-wrap">
-    <section class="panel resolved">
-      <div class="resolved-grid">
-        <div id="resolved-card" class="resolved-card"></div>
-        <div>
-          <div class="resolved-head"><h1>Eval</h1> <code id="resolved-id">——————</code></div>
-          <p id="resolved-prompt" class="lede"></p>
-          <dl id="resolved-detail" class="detail"></dl>
-          <div class="actions">
-            <button id="btn-run-as-is" class="btn dark lg">Run it as is</button>
-            <button id="btn-change-first" class="btn ghost lg">Change something first</button>
-          </div>
-          <p class="fineprint">Nothing has been sent anywhere yet. Changing the prompt, the models or the keywords gives the run its own ID, so this one stays exactly as it was published. Or <a href="/new" data-go="new">start a new eval from scratch</a>.</p>
-        </div>
-      </div>
-    </section>
-  </div>
-</div>
-
 <!-- ==================== API KEY ==================== -->
 <div class="stage stage-key">
   <header class="site-head">
@@ -256,7 +229,6 @@ try {
       <h1>Connect an OpenRouter key</h1>
       <p class="lede">llmscope sends every request through OpenRouter, so a run needs a key of your own. It stays in
         this browser, it is sent only to openrouter.ai, and you pay OpenRouter directly for what you use.</p>
-      <div id="key-pending" class="pending-eval" hidden></div>
       <label class="field">Your key
         <input id="apikey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-or-v1-…" aria-label="OpenRouter API key">
       </label>

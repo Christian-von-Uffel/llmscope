@@ -3,20 +3,27 @@
 // resolves it in the browser, so these routes exist to make sure the URL answers at all — and to give each
 // bundled eval a real page whose title and description say which one it is, rather than one generic page.
 //
-// Only the evals shipped with the repository can be built ahead of time. An id from a run somebody did
-// themselves is not known here, so it is left to the rewrite in vercel.json, the Worker, and the matching
-// fallback in `llmscope serve` to hand those the same page.
+// Only what is shipped with the repository can be built ahead of time: the bundled evals, and the runs the
+// landing page's samples are drawn from, which the samples link to. An id from a run somebody did themselves is
+// not known here, so it is left to the rewrite in vercel.json, the Worker, and the matching fallback in
+// `llmscope serve` to hand those the same page.
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-/** One static path per bundled eval, with its spec as the page's props. */
+const readJson = async (file) => JSON.parse(await fs.readFile(file, 'utf8'));
+
+/** One static path per bundled eval and per sample run, with its spec as the page's props. */
 export async function evalPaths() {
-  const dir = path.join(process.cwd(), 'evals');
-  const files = (await fs.readdir(dir)).filter((f) => f.endsWith('.json'));
-  return Promise.all(files.map(async (file) => {
-    const spec = JSON.parse(await fs.readFile(path.join(dir, file), 'utf8'));
-    return { params: { id: path.basename(file, '.json') }, props: { spec } };
-  }));
+  const evals = path.join(process.cwd(), 'evals');
+  const runs = path.join(process.cwd(), 'assets', 'samples', 'runs');
+  const paths = await Promise.all((await fs.readdir(evals)).filter((f) => f.endsWith('.json')).map(async (file) =>
+    ({ params: { id: path.basename(file, '.json') }, props: { spec: await readJson(path.join(evals, file)), noun: 'eval' } })));
+  // A run made before runs had ids of their own is filed under its eval's id, which already has its page.
+  for (const file of (await fs.readdir(runs)).filter((f) => f.endsWith('.results.json'))) {
+    const id = path.basename(file, '.results.json');
+    if (!paths.some((p) => p.params.id === id)) paths.push({ params: { id }, props: { spec: (await readJson(path.join(runs, file))).spec, noun: 'run' } });
+  }
+  return paths;
 }
 
 /**

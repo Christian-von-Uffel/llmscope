@@ -280,8 +280,11 @@ after a load, so a saved eval can be reworded in place, and the slots under it r
 box searches the whole catalogue, not just the pre-selected flagships — type `gemini` and *Select all 15* to run
 the family, or add one by name in the field below the list.
 
-**Addresses.** A run on show is at `llmscope.dev/<id>`, the address its card prints, so the bar can be copied as
-a link; someone who opens it sees the card and what the run asked, and can run it as it is or change it first.
+**Addresses.** A run on show is at `llmscope.dev/<id>`, the address its card prints, and the bar adds the image
+in the frame — `?image=refusals`, `?image=wordcloud`, `?image=responses&excerpt=matches`, one `kind` from
+`src/images.js` — so it can be copied as a link to exactly that view. Someone who opens it lands in the app, on
+that image, with the run's other images and every reply to explore and its eval on the form: no key is needed to
+look, only to run it again or change something first. Each sample on the landing page links to its run this way.
 **New eval** in the header — `llmscope.dev/new` — is the form, empty, with your models still ticked: a run
 opened from a card is otherwise one edit from being that eval changed, and this makes it one click from being
 a different eval.
@@ -885,7 +888,7 @@ opened from disk is saved the same way. Mock runs are demos and stay in the brow
 sends a run from `out/` and prints its address, and `--remove` takes it down again. Nothing else is sent: the
 key never goes near it, and the page's preferences stay in the browser. An eval ID typed into *Open…* — or an
 `/<id>` link — is looked up here after this browser's own runs, so a bare id from somebody else's post opens
-their card, while your own run opens straight into the app.
+their run in the app, images and replies, just as your own does.
 
 **Who may change what.** There are no accounts. Whoever saves a run sends a token minted on their side — the
 page keeps one per browser, the CLI one per machine in `~/.config/llmscope/config.json` — and the registry keeps

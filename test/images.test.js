@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { runEval } from '../src/engine.js';
 import { createMockProvider } from '../src/providers/mock.js';
 import { ensureText } from '../src/text.js';
-import { IMAGES, TABS, tabsFor, measureTab, tabOf, imageOf, imageSuffix, imagesFor, sheetKind, drawImage, markedWords } from '../src/images.js';
+import { IMAGES, TABS, tabsFor, measureTab, tabOf, imageOf, imagePlace, imageSuffix, imagesFor, sheetKind, drawImage, markedWords } from '../src/images.js';
 
 await ensureText();
 const provider = createMockProvider();
@@ -86,4 +86,18 @@ test('the browser can reach every image the CLI writes: each sits under a tab, a
   assert.equal(tabOf(imageOf('card'), keyword), 'keyword', 'the results card follows the measure');
   assert.equal(tabOf(imageOf('card'), sentiment), 'sentiment');
   assert.equal(tabOf(imageOf('keywords'), plain), 'keyword', 'the keyword card does not');
+});
+
+test('an address can name any image a run draws, and opens on its tab', () => {
+  const sentiment = { ...plain, spec: { ...plain.spec, primary: 'sentiment' } };
+  for (const image of IMAGES) {
+    for (const run of [plain, keyword, sentiment]) assert.equal(imagePlace(image.kind, run)?.tab, tabOf(image, run), `?image=${image.kind}`);
+  }
+  assert.deepEqual(imagePlace('card', keyword), { tab: 'keyword', excerpt: null });
+  assert.deepEqual(imagePlace('ends', plain), { tab: 'responses', excerpt: 'ends' }, 'the ends of every reply are the Responses tab at its ends excerpt');
+  assert.deepEqual(imagePlace('responses', plain, 'matches'), { tab: 'responses', excerpt: 'matches' });
+  assert.deepEqual(imagePlace('responses', plain), { tab: 'responses', excerpt: 'full' }, 'the responses sheet names no excerpt: every word');
+  assert.deepEqual(imagePlace('responses', plain, 'ends'), { tab: 'responses', excerpt: 'full' }, 'the ends excerpt is an image of its own, not this one');
+  assert.deepEqual(imagePlace('responses', plain, 'bogus'), { tab: 'responses', excerpt: 'full' });
+  assert.equal(imagePlace('nope', plain), null, 'an image there is no row for opens on the default');
 });
